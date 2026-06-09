@@ -22,6 +22,18 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.6",
 ]
+# Audio models — transformers-based embedders (CLAP, MERT) + audio I/O. Installed
+# on the box and on the Mac (CPU/MPS) to develop/verify the embedders.
+models = [
+    "torch>=2.2",
+    "torchaudio>=2.2",
+    "soundfile>=0.12",
+    "transformers>=4.40",
+]
+# MuQ / MuQ-MuLan — separate, heavier package; box-primarily.
+muq = [
+    "muq>=0.1",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pipeline"]
