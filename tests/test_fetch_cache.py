@@ -89,3 +89,14 @@ def test_blobs_are_namespaced_by_platform(conn, tmp_path: Path):
     cached_fetch(conn, "bandcamp", URL, fetcher=_fetcher(b"x"), cache_dir=tmp_path)
     row = conn.execute("SELECT content_path FROM fetch_cache WHERE url = %s", (URL,)).fetchone()
     assert row[0].startswith("bandcamp/")
+
+
+def test_refresh_bypasses_cache_read_but_still_writes(conn, tmp_path: Path):
+    cached_fetch(conn, "deezer", URL, fetcher=_fetcher(b"stale-signed-url"), cache_dir=tmp_path)
+    f2 = _fetcher(b"fresh-signed-url")
+    r = cached_fetch(conn, "deezer", URL, fetcher=f2, cache_dir=tmp_path, refresh=True)
+    assert (r.from_cache, r.body) == (False, b"fresh-signed-url")
+    assert len(f2.calls) == 1
+    # the cache row now holds the fresh payload for future readers
+    r3 = cached_fetch(conn, "deezer", URL, fetcher=_fetcher(b"never-called"), cache_dir=tmp_path)
+    assert (r3.from_cache, r3.body) == (True, b"fresh-signed-url")

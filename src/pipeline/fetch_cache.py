@@ -56,12 +56,19 @@ def cached_fetch(
     *,
     fetcher=None,
     cache_dir: Path | str | None = None,
+    refresh: bool = False,
 ) -> CachedResponse:
+    """`refresh=True` skips the cache READ (still writes): for payloads carrying
+    expiring signed URLs that must be re-resolved live (Deezer previews)."""
     cache_dir = Path(cache_dir if cache_dir is not None else Settings().fetch_cache_dir).expanduser()
 
-    row = conn.execute(
-        "SELECT status, content_type, content_path FROM fetch_cache WHERE url = %s", (url,)
-    ).fetchone()
+    row = (
+        None
+        if refresh
+        else conn.execute(
+            "SELECT status, content_type, content_path FROM fetch_cache WHERE url = %s", (url,)
+        ).fetchone()
+    )
     if row is not None:
         status, content_type, content_path = row
         body = gzip.decompress((cache_dir / content_path).read_bytes())

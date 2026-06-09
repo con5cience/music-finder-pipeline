@@ -123,3 +123,52 @@ def test_audio_sniffer_rejects_error_bodies():
     assert _audio_ext(b"<!DOCTYPE html><html>...") is None  # CDN sad page
     assert _audio_ext(b'{"error": "expired"}') is None
     assert _audio_ext(b"") is None
+
+
+def test_expired_url_refreshes_and_embeds(conn):
+    # Signed URL 403s → refresher provides a fresh URL → track embeds.
+    from pipeline.embed_job import AudioFetchError
+
+    a = _artist(conn, "A")
+    _track(conn, a, "t1", "/expired/t1.mp3")
+
+    def fake_fetch(url, workdir):
+        if "/expired/" in url:
+            raise AudioFetchError("audio fetch HTTP 403")
+        return url
+
+    refreshed = []
+
+    def refresher(conn_, platform, ptid):
+        refreshed.append((platform, ptid))
+        return "/fresh/t1.mp3"
+
+    n = embed_artist_clips(conn, _embedder(), a, fetch=fake_fetch, refresher=refresher)
+    assert n == 1
+    assert refreshed == [("deezer", "t1")]
+
+
+def test_unrefreshable_track_is_skipped_not_poisonous(conn):
+    # One dead track must not block the artist's other tracks (the calibration
+    # stall: a single 403 retried the whole batch forever).
+    from pipeline.embed_job import AudioFetchError
+
+    a = _artist(conn, "A")
+    _track(conn, a, "dead", "/expired/dead.mp3")
+    t_ok = _track(conn, a, "ok", "/audio/ok.mp3")
+
+    def fake_fetch(url, workdir):
+        if "/expired/" in url:
+            raise AudioFetchError("audio fetch HTTP 403")
+        return url
+
+    n = embed_artist_clips(conn, _embedder(), a, fetch=fake_fetch, refresher=lambda *args: None)
+    assert n == 1  # the healthy track embedded; the dead one skipped
+    rows = conn.execute(
+        "SELECT ce.track_id FROM clip_embedding ce JOIN audio_track t ON t.id = ce.track_id "
+        "WHERE t.artist_id = %s",
+        (a,),
+    ).fetchall()
+    assert [r[0] for r in rows] == [t_ok]
+    # the dead track stays pending for a later pass (no clip row, not rejected)
+    assert len(pending_tracks(conn, a, "mock-model")) == 1

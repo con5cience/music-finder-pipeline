@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from pipeline import activities
@@ -22,6 +23,9 @@ _DISCOVERY_TIMEOUT = timedelta(minutes=5)  # platform IO behind a rate-capped qu
 # First embed on a fresh worker loads model weights (~30s) before downloading
 # ~12 previews + GPU inference; 30s would timeout-loop the weight load forever.
 _EMBED_TIMEOUT = timedelta(minutes=10)
+# Bounded: the calibration run proved unlimited default retries turn a
+# persistent failure (expired signed URLs → 403) into a forever-stall.
+_IO_RETRY = RetryPolicy(maximum_attempts=5)
 
 
 @dataclass
@@ -75,6 +79,7 @@ class IngestArtistWorkflow:
                 inp.artist_id,
                 task_queue=queue_for(inp.platform),
                 start_to_close_timeout=_DISCOVERY_TIMEOUT,
+                retry_policy=_IO_RETRY,
             )
 
         embedded = await workflow.execute_activity(
@@ -82,6 +87,7 @@ class IngestArtistWorkflow:
             inp.artist_id,
             task_queue=GPU_QUEUE,
             start_to_close_timeout=_EMBED_TIMEOUT,
+            retry_policy=_IO_RETRY,
         )
         return {
             "status": "embedded",

@@ -57,6 +57,31 @@ def _identity_row(conn: Connection, artist_id: str, platform_id: str) -> str:
     return row[0]
 
 
+def refresh_preview(
+    conn: Connection,
+    platform_track_id: str,
+    *,
+    fetcher=None,
+    cache_dir: Path | str | None = None,
+) -> str | None:
+    """Re-resolve a track's preview URL live (signed URLs expire: hdnea/hmac).
+
+    Updates audio_track.audio_url and returns the fresh URL, or None when the
+    track no longer offers a preview. Bypasses the cache READ by design — the
+    cached payload is exactly what went stale.
+    """
+    body = cached_fetch(
+        conn, "deezer", f"{_API}/track/{platform_track_id}", fetcher=fetcher, cache_dir=cache_dir, refresh=True
+    ).body
+    preview = json.loads(body).get("preview") or None
+    if preview:
+        conn.execute(
+            "UPDATE audio_track SET audio_url = %s WHERE platform = 'deezer' AND platform_track_id = %s",
+            (preview, platform_track_id),
+        )
+    return preview
+
+
 def discover_deezer(
     conn: Connection,
     artist_id: str,
