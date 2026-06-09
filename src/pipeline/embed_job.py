@@ -12,6 +12,7 @@ acquisition; the schema already supports it via segment_start_s.
 
 from __future__ import annotations
 
+import hashlib
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -47,14 +48,46 @@ def pending_tracks(conn: Connection, artist_id: str, model: str) -> list[tuple]:
     ).fetchall()
 
 
+_UA = "music-finder-pipeline/0.1 (wstiern@gmail.com)"
+
+
+def _audio_ext(head: bytes) -> str | None:
+    """Extension from content magic, or None for non-audio (HTML error bodies).
+
+    The extension MATTERS: libsndfile's mp3 detection is extension-gated
+    (verified empirically — identical bytes open as .mp3, fail as .audio), so
+    downloads must be named for what they contain, never for their URL tail.
+    """
+    if head.startswith(b"ID3") or (len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0):
+        return ".mp3"
+    if head.startswith(b"RIFF"):
+        return ".wav"
+    if head.startswith(b"OggS"):
+        return ".ogg"
+    if head.startswith(b"fLaC"):
+        return ".flac"
+    return None
+
+
 def fetch_audio(url: str, workdir: Path) -> str:
-    """Materialize a track's audio locally. http(s) URLs download; anything else
-    is treated as an already-local path (box-local files, tests)."""
-    if url.startswith(("http://", "https://")):
-        dest = workdir / Path(url).name.split("?")[0]
-        urllib.request.urlretrieve(url, dest)  # noqa: S310 — urls come from our own audio_track rows
-        return str(dest)
-    return url
+    """Materialize a track's audio locally. http(s) URLs download (real UA,
+    status-checked, content-sniffed — signed CDN URLs come in shifting formats
+    and some variants reject library UAs); anything else is treated as an
+    already-local path (box-local files, tests)."""
+    if not url.startswith(("http://", "https://")):
+        return url
+    req = urllib.request.Request(url, headers={"User-Agent": _UA})
+    with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 — urls from our own audio_track rows
+        if resp.status != 200:
+            raise RuntimeError(f"audio fetch HTTP {resp.status}: {url[:120]}")
+        body = resp.read()
+    ext = _audio_ext(body[:16])
+    if ext is None:
+        raise RuntimeError(f"audio fetch returned non-audio ({body[:40]!r}): {url[:120]}")
+    # hash-named: URL tails carry signing junk ('*~data=...') unfit for filenames
+    dest = workdir / (hashlib.sha256(url.encode()).hexdigest()[:24] + ext)
+    dest.write_bytes(body)
+    return str(dest)
 
 
 def _vec_text(vector: list[float]) -> str:

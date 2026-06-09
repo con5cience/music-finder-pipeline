@@ -15,8 +15,10 @@ from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
     from pipeline import activities
+    from pipeline.queues import DISCOVERY_ACTIVITIES, queue_for
 
 _ACTIVITY_TIMEOUT = timedelta(seconds=30)
+_DISCOVERY_TIMEOUT = timedelta(minutes=5)  # platform IO behind a rate-capped queue
 
 
 @dataclass
@@ -62,7 +64,23 @@ class IngestArtistWorkflow:
             if self._review_decision != "approved":
                 return {"status": "rejected_by_review", "page_type": page_type}
 
+        discovered = 0
+        discovery = DISCOVERY_ACTIVITIES.get(inp.platform)
+        if discovery is not None:
+            discovered = await workflow.execute_activity(
+                discovery,
+                inp.artist_id,
+                task_queue=queue_for(inp.platform),
+                start_to_close_timeout=_DISCOVERY_TIMEOUT,
+            )
+
         embedded = await workflow.execute_activity(
             activities.embed_artist, inp.artist_id, start_to_close_timeout=_ACTIVITY_TIMEOUT
         )
-        return {"status": "embedded", "tier": binding["tier"], "page_type": page_type, "embedded": embedded}
+        return {
+            "status": "embedded",
+            "tier": binding["tier"],
+            "page_type": page_type,
+            "discovered": discovered,
+            "embedded": embedded,
+        }

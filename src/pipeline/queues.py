@@ -39,3 +39,10 @@ PLATFORM_QUEUES: dict[str, QueueConfig] = {
 
 def queue_for(platform: str) -> str:
     return PLATFORM_QUEUES[platform].name
+
+
+# platform → discovery activity name (workflows dispatch by string so the
+# workflow sandbox never imports platform IO code). Filled per slice.
+DISCOVERY_ACTIVITIES: dict[str, str] = {
+    "deezer": "discover_deezer_tracks",
+}

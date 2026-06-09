@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 
 from pipeline.bench.mock import MockEmbedder
-from pipeline.embed_job import embed_artist_clips, pending_tracks
+from pipeline.embed_job import _audio_ext, embed_artist_clips, pending_tracks
 
 
 def _artist(conn, name: str) -> str:
@@ -94,3 +94,19 @@ def test_no_pending_tracks_is_a_clean_noop(conn):
     a = _artist(conn, "A")
     assert embed_artist_clips(conn, _embedder(), a) == 0
     assert conn.execute("SELECT count(*) FROM artist_embedding WHERE artist_id=%s", (a,)).fetchone()[0] == 0
+
+
+def test_audio_sniffer_names_for_content():
+    # libsndfile's mp3 detection is extension-gated: the suffix must match
+    # the sniffed content, never the URL tail.
+    assert _audio_ext(b"ID3\x04\x00\x00rest") == ".mp3"
+    assert _audio_ext(bytes([0xFF, 0xFB, 0x92, 0x64])) == ".mp3"  # raw MPEG sync
+    assert _audio_ext(b"RIFF....WAVE") == ".wav"
+    assert _audio_ext(b"OggS\x00") == ".ogg"
+    assert _audio_ext(b"fLaC\x00") == ".flac"
+
+
+def test_audio_sniffer_rejects_error_bodies():
+    assert _audio_ext(b"<!DOCTYPE html><html>...") is None  # CDN sad page
+    assert _audio_ext(b'{"error": "expired"}') is None
+    assert _audio_ext(b"") is None

@@ -21,18 +21,25 @@ from pipeline.workflows import IngestArtistInput, IngestArtistWorkflow
 
 
 def _real_identity(db_url: str) -> tuple[str, str, str] | None:
+    from pipeline.queues import DISCOVERY_ACTIVITIES
+
+    # Pick a platform WITHOUT a discovery activity: this test's worker only
+    # polls the workflow queue, so a discoverable platform would park the
+    # workflow waiting for its {platform}-io queue.
     with psycopg.connect(db_url) as conn:
         return conn.execute(
             """
             SELECT pi.artist_id::text, pi.platform, pi.platform_id
             FROM platform_identity pi
-            WHERE NOT EXISTS (
+            WHERE pi.platform != ALL(%s)
+              AND NOT EXISTS (
                 SELECT 1 FROM audio_track t
                 WHERE t.artist_id = pi.artist_id AND t.audio_url IS NOT NULL
             )
             ORDER BY pi.platform, pi.platform_id
             LIMIT 1
-            """
+            """,
+            (list(DISCOVERY_ACTIVITIES),),
         ).fetchone()
 
 

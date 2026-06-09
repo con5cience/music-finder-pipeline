@@ -47,6 +47,29 @@ async def bind_source(artist_id: str, platform: str, platform_id: str) -> dict |
     return await asyncio.to_thread(_bind_sync, artist_id, platform, platform_id)
 
 
+def _discover_deezer_sync(artist_id: str) -> int:
+    from pipeline.sources.deezer import discover_deezer
+
+    settings = Settings()
+    with psycopg.connect(settings.database_url) as conn:
+        row = conn.execute(
+            "SELECT platform_id FROM platform_identity WHERE platform = 'deezer' AND artist_id = %s",
+            (artist_id,),
+        ).fetchone()
+        if row is None:
+            return 0
+        n = discover_deezer(conn, artist_id, row[0])
+        conn.commit()
+    return n
+
+
+@activity.defn
+async def discover_deezer_tracks(artist_id: str) -> int:
+    """Discover Deezer preview tracks for a bound artist (runs on deezer-io,
+    rate-capped server-side). Returns new audio_track rows written."""
+    return await asyncio.to_thread(_discover_deezer_sync, artist_id)
+
+
 @functools.cache
 def _embedder():
     # Lazy: torch + model deps only load in workers that run this activity.

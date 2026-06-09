@@ -91,3 +91,27 @@ async def test_unbindable_identity_ends_unbound():
         res = await _run(env, _mock_bind(None))
     assert res["status"] == "unbound"
     assert "embedded" not in res
+
+
+@activity.defn(name="discover_deezer_tracks")
+async def mock_discover(artist_id: str) -> int:
+    return 7
+
+
+async def test_deezer_platform_dispatches_discovery_on_io_queue():
+    env = await _env()
+    async with env:
+        tq = "test-" + uuid.uuid4().hex
+        async with (
+            Worker(env.client, task_queue=tq, workflows=[IngestArtistWorkflow],
+                   activities=[mock_classify, _mock_bind("A"), mock_embed]),
+            Worker(env.client, task_queue="deezer-io", activities=[mock_discover]),
+        ):
+            res = await env.client.execute_workflow(
+                IngestArtistWorkflow.run,
+                IngestArtistInput("a1", "deezer", "6281"),
+                id="wf-" + uuid.uuid4().hex,
+                task_queue=tq,
+            )
+    assert res["status"] == "embedded"
+    assert res["discovered"] == 7  # came from the deezer-io worker
