@@ -30,6 +30,10 @@ uv run ruff check .     # lint
 docker compose up -d db # local Postgres for schema/integration work
 ```
 
+Common actions are `poe` tasks (the "npm scripts" of this repo): `uv run poe
+test | lint | check | db-up | migrate | worker | temporal | …`. Full setup +
+box runbook in [`docs/SETUP.md`](docs/SETUP.md).
+
 Device model: code is device-agnostic — mocked in unit tests, CPU/MPS fallback
 on the Mac for integration/E2E, CUDA by default on the box. Force with
 `PIPELINE_DEVICE=cpu|mps|cuda`.

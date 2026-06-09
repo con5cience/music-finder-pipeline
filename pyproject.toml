@@ -17,6 +17,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "poethepoet>=0.46.0",
     "pytest>=8",
     "pytest-asyncio>=0.23",
     "ruff>=0.6",
@@ -36,3 +37,19 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+# Common tasks (the "npm scripts" of this repo). Run: `uv run poe <task>`.
+[tool.poe.tasks]
+test = "pytest -q"
+lint = "ruff check ."
+fix = "ruff check --fix ."
+fmt = "ruff format ."
+db-up = "docker compose up -d db"
+db-down = "docker compose down"
+migrate = "alembic upgrade head"
+migrate-down = "alembic downgrade -1"
+migrate-new = "alembic revision -m"   # usage: uv run poe migrate-new "add embedding tables"
+migrate-status = "alembic current"
+worker = "python -m pipeline.worker"
+temporal = "temporal server start-dev"
+check.sequence = ["lint", "test"]
