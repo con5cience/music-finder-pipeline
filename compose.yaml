@@ -1,0 +1,18 @@
+# Local dev services mirroring the box. Port 5440 avoids clashing with the
+# music-finder app's Postgres (5433/5434). Temporal dev runs via the SDK's
+# in-process test env for tests and `temporal server start-dev` for manual runs;
+# a Temporal service is added to this compose in the orchestration slice.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: pipeline
+      POSTGRES_PASSWORD: pipeline
+      POSTGRES_DB: pipeline
+    ports:
+      - "127.0.0.1:5440:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
