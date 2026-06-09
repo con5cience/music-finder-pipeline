@@ -17,16 +17,34 @@ from temporalio import activity
 from pipeline.config import Settings
 
 
-@activity.defn
-async def classify_page(platform_id: str) -> str:
-    """Return the page_type for a platform page (artist/label/compilation/topic). STUB."""
-    return "artist"
+def _classify_sync(platform: str, platform_id: str) -> str:
+    from pipeline.bind import classify_identity
+
+    with psycopg.connect(Settings().database_url) as conn:
+        return classify_identity(conn, platform, platform_id)
 
 
 @activity.defn
-async def bind_source(artist_id: str, platform: str, platform_id: str) -> dict:
-    """Bind a source to an artist under a verification tier (A/B1/B2/C). STUB → Tier A."""
-    return {"tier": "A", "track_count": 0}
+async def classify_page(platform: str, platform_id: str) -> str:
+    """Page type from identity records (MB-derived pages are pre-classified).
+
+    'unknown' means we have no authoritative record — live classification is
+    the B-tier slice's job."""
+    return await asyncio.to_thread(_classify_sync, platform, platform_id)
+
+
+def _bind_sync(artist_id: str, platform: str, platform_id: str) -> dict | None:
+    from pipeline.bind import tier_a_binding
+
+    with psycopg.connect(Settings().database_url) as conn:
+        return tier_a_binding(conn, artist_id, platform, platform_id)
+
+
+@activity.defn
+async def bind_source(artist_id: str, platform: str, platform_id: str) -> dict | None:
+    """Tier-A binding from MB url-rel provenance, or None when no authoritative
+    link exists (search-based B-tier binding is a later slice)."""
+    return await asyncio.to_thread(_bind_sync, artist_id, platform, platform_id)
 
 
 @functools.cache

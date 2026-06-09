@@ -17,13 +17,15 @@ from pipeline.workflows import IngestArtistInput, IngestArtistWorkflow
 
 
 @activity.defn(name="classify_page")
-async def mock_classify(platform_id: str) -> str:
+async def mock_classify(platform: str, platform_id: str) -> str:
     return "artist"
 
 
-def _mock_bind(tier: str):
+def _mock_bind(tier: str | None):
     @activity.defn(name="bind_source")
-    async def bind(artist_id: str, platform: str, platform_id: str) -> dict:
+    async def bind(artist_id: str, platform: str, platform_id: str) -> dict | None:
+        if tier is None:
+            return None
         return {"tier": tier, "track_count": 3}
 
     return bind
@@ -81,3 +83,11 @@ async def test_tier_c_rejected_by_review():
     async with env:
         res = await _run(env, _mock_bind("C"), signal="rejected")
     assert res["status"] == "rejected_by_review"
+
+
+async def test_unbindable_identity_ends_unbound():
+    env = await _env()
+    async with env:
+        res = await _run(env, _mock_bind(None))
+    assert res["status"] == "unbound"
+    assert "embedded" not in res

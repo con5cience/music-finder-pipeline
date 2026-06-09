@@ -43,13 +43,18 @@ class IngestArtistWorkflow:
     @workflow.run
     async def run(self, inp: IngestArtistInput) -> dict:
         page_type = await workflow.execute_activity(
-            activities.classify_page, inp.platform_id, start_to_close_timeout=_ACTIVITY_TIMEOUT
+            activities.classify_page,
+            args=[inp.platform, inp.platform_id],
+            start_to_close_timeout=_ACTIVITY_TIMEOUT,
         )
         binding = await workflow.execute_activity(
             activities.bind_source,
             args=[inp.artist_id, inp.platform, inp.platform_id],
             start_to_close_timeout=_ACTIVITY_TIMEOUT,
         )
+        if binding is None:
+            # No authoritative link and no search path yet (B-tier slice).
+            return {"status": "unbound", "page_type": page_type}
 
         if binding["tier"] == "C":
             # Park until a reviewer signals; Temporal persists this wait.
