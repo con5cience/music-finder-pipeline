@@ -12,32 +12,53 @@ One workflow per (artist × platform identity), id `ingest-{platform}-{platform_
 (deterministic → seeding is idempotent). The Tier-C park is the reason Temporal
 exists here: a parked workflow survives crashes for as long as review takes.
 
+What each step actually does:
+
+1. **Classify** — "do we already know what kind of page this is?" A local DB
+   read: MB-derived pages were classified at bootstrap (artist/label/etc.).
+   No network. Unknown pages stay unknown until a future slice classifies live.
+2. **Bind** — "can we PROVE this page belongs to this artist?" Today the only
+   accepted proof is a MusicBrainz url-rel (→ Tier A). No proof → the workflow
+   ends `unbound` and **nothing is crawled, searched, or guessed**. Search/
+   crawler-based binding (Tier B/C evidence scoring) does not exist yet — it is
+   design-gated: thorough investigation + empirical testing before any code,
+   then the 1k-artist calibration before it touches the corpus (ADR-017 §3).
+3. **Review park (Tier C)** — when bind one day yields ambiguous evidence, the
+   workflow freezes here, crash-safe, until a human signals a verdict. Wired
+   but unreachable today (nothing produces Tier C yet).
+4. **Discover** — "ask the platform what this artist's tracks are." Runs on the
+   platform's own rate-capped queue through the fetch cache. Deezer only, so
+   far: top-12 previews, albums fallback, main-artist tracks only.
+5. **Embed** — "turn the tracks into corpus vectors." Download previews, run
+   MuQ on the GPU, store model-stamped clip vectors, refresh the artist's
+   centroid. The artist is now in the similarity space.
+
 ```mermaid
 flowchart TD
-    START(["start_workflow<br/>id = ingest-{platform}-{platform_id}"]) --> CLASSIFY
+    START(["seeded from the Tier-A pool<br/>one run per artist × platform page"]) --> CLASSIFY
 
     subgraph PQ ["task queue: pipeline"]
-        CLASSIFY["classify_page(platform, platform_id)<br/>DB-truth: platform_identity.page_type"]
-        BIND["bind_source(artist, platform, platform_id)<br/>Tier-A from MB url-rel evidence"]
-        EMBED["embed_artist(artist_id)<br/>MuQ via registry · stamped clips · centroid"]
+        CLASSIFY["1 · What kind of page is this?<br/>local lookup — bootstrap already<br/>classified MB-derived pages"]
+        BIND["2 · Can we prove this page is this artist?<br/>only proof today: a MusicBrainz url-rel → Tier A<br/>no proof → stop; we never guess"]
+        EMBED["5 · Make the artist searchable<br/>download previews → MuQ on GPU →<br/>stamped vectors + artist centroid"]
     end
 
     CLASSIFY --> BIND
-    BIND -->|"None (no authoritative link)"| UNBOUND(["status: unbound<br/>(B-tier search = slice 3d)"])
-    BIND -->|"tier C"| PARK["⏸ wait_condition<br/>parked, crash-safe"]
-    PARK -->|"signal: submit_review_decision"| DECIDE{decision}
-    DECIDE -->|rejected| REJECTED(["status: rejected_by_review"])
-    DECIDE -->|approved| DISC
-    BIND -->|"tier A / B1 / B2"| DISC{platform in<br/>DISCOVERY_ACTIVITIES?}
+    BIND -->|"no authoritative link"| UNBOUND(["unbound — artist skipped<br/>crawler/search binding: not built,<br/>design-gated (investigate first)"])
+    BIND -->|"ambiguous evidence (Tier C)<br/>unreachable today"| PARK["3 · ⏸ frozen for human review<br/>crash-safe, indefinitely"]
+    PARK -->|"reviewer verdict"| DECIDE{approved?}
+    DECIDE -->|no| REJECTED(["rejected — never embedded"])
+    DECIDE -->|yes| DISC
+    BIND -->|"proven (Tier A)"| DISC{does this platform have<br/>track discovery built?}
 
     subgraph DQ ["task queue: deezer-io · server-capped 10/s"]
-        DDISC["discover_deezer_tracks(artist_id)<br/>top-12 → albums fallback<br/>source-correctness: main artist only"]
+        DDISC["4 · Ask Deezer for the artist's tracks<br/>top-12 previews, albums fallback,<br/>this artist's own tracks only, cached"]
     end
 
     DISC -->|deezer| DDISC
-    DISC -->|"other (no discovery yet)"| EMBED
-    DDISC -->|"discovered: n"| EMBED
-    EMBED --> DONE(["status: embedded<br/>{tier, page_type, discovered, embedded}"])
+    DISC -->|"not yet (bandcamp/sc/yt later)"| EMBED
+    DDISC --> EMBED
+    EMBED --> DONE(["embedded — in the corpus<br/>with tier + provenance recorded"])
 ```
 
 ## System data flow — bootstrap to corpus
@@ -103,3 +124,10 @@ sequenceDiagram
 | Built + verified live | Designed, not built (dashed) |
 |---|---|
 | MB bootstrap, Tier-A bind/classify, deezer-io discovery, fetch cache, embed path, centroids, seeder | Publish workflow, admin review wiring, B-tier search (3d), Bandcamp/SC/YT discovery, Tidal trickle |
+
+**Explicitly not built and design-gated: crawler/search-based artist discovery.**
+Binding artists without an MB url-rel (platform search, evidence scoring,
+triangulation — Tier B1/B2/C) requires its own investigation + empirical
+testing cycle before any implementation, and the 1k-artist calibration run
+before it feeds the corpus (ADR-017 §3). Until then, no-proof artists end
+`unbound` — by design, not omission.
