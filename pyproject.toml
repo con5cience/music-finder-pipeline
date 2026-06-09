@@ -11,6 +11,8 @@ dependencies = [
     "temporalio>=1.7",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
+    "alembic>=1.18.4",
+    "psycopg[binary]>=3.3.4",
 ]
 
 [dependency-groups]
