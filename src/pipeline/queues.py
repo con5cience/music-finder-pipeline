@@ -49,6 +49,7 @@ def queue_for(platform: str) -> str:
 # workflow sandbox never imports platform IO code). Filled per slice.
 DISCOVERY_ACTIVITIES: dict[str, str] = {
     "deezer": "discover_deezer_tracks",
+    "bandcamp": "discover_bandcamp_tracks",
 }
 
 # Audio-signal cascade (ADR-017 §2, floors per user decision 2026-06-09):

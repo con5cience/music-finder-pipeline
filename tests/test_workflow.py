@@ -117,17 +117,19 @@ async def test_nothing_usable_is_no_signal():
 
 
 async def test_platform_without_flow_is_skipped_not_fatal():
-    # bandcamp has no discovery activity yet: identity stays pending, the
+    # soundcloud has no discovery activity yet: identity stays pending, the
     # cascade moves on, and choose still runs (an earlier-scanned source or
-    # nothing may win).
+    # nothing may win). NB: must use a genuinely flow-less platform — this
+    # test hung for 30 minutes when bandcamp gained a flow and the dispatch
+    # went to a queue no test worker polls.
     env = await _env()
     calls: list = []
     async with env:
         res = await _run(
             env,
-            _mock_plan([["bandcamp", "b1"], ["deezer", "d1"]]),
+            _mock_plan([["soundcloud", "s1"], ["deezer", "d1"]]),
             _mock_record_scan(12, calls),
             _mock_choose({"source": "deezer", "ratio": 1.2}),
         )
     assert res["status"] == "embedded"
-    assert calls == ["deezer"]  # bandcamp never scanned (no flow), deezer was
+    assert calls == ["deezer"]  # soundcloud never scanned (no flow), deezer was

@@ -24,12 +24,25 @@ def _identity(conn, a, platform, pid):
     )
 
 
-def _tracks(conn, a, platform, n, prefix):
+def _tracks(conn, a, platform, n, prefix, tmp_path=None):
+    """Insert n tracks. Windowed platforms (bandcamp) get REAL wav files —
+    the windowing path reads audio; preview platforms keep fake paths."""
     for i in range(n):
+        if tmp_path is not None:
+            import numpy as np
+            import soundfile as sf
+
+            p = tmp_path / f"{prefix}-{i}.wav"
+            rng = np.random.default_rng(i)
+            sf.write(p, rng.standard_normal(90 * 8000).astype(np.float32) * 0.05, 8000)
+            url, dur = str(p), 90
+        else:
+            url, dur = f"/audio/{prefix}-{i}.mp3", 30
         conn.execute(
             "INSERT INTO audio_track (artist_id, platform, platform_track_id, audio_url, duration_s, "
-            "binding_tier, verification_status) VALUES (%s, %s, %s, %s, 30, 'A', 'verified')",
-            (a, platform, f"{prefix}-{i}", f"/audio/{prefix}-{i}.mp3"),
+            "binding_tier, binding_evidence, verification_status) "
+            "VALUES (%s, %s, %s, %s, %s, 'A', %s, 'verified')",
+            (a, platform, f"{prefix}-{i}", url, dur, f'{{"release_index": {i}}}'),
         )
 
 
@@ -105,12 +118,12 @@ def test_mark_scanned_terminal_verdicts(conn):
     assert rows == {"deezer": "scanned", "soundcloud": "empty"}
 
 
-def test_embed_with_source_enforces_centroid_purity(conn):
+def test_embed_with_source_enforces_centroid_purity(conn, tmp_path):
     # tracks from two platforms exist; embedding with source='deezer' must
     # produce a centroid built ONLY from deezer clips, stamped with the ratio.
     a = _artist(conn)
     _tracks(conn, a, "deezer", 3, "zz-cas-pd")
-    _tracks(conn, a, "bandcamp", 2, "zz-cas-pb")
+    _tracks(conn, a, "bandcamp", 2, "zz-cas-pb", tmp_path)
     n = embed_artist_clips(conn, MockEmbedder(dim=8, name="mock-model"), a, source="deezer", signal_ratio=0.3)
     assert n == 3  # bandcamp tracks untouched
     src, ratio, clip_count = conn.execute(
@@ -143,19 +156,25 @@ def test_rerun_with_no_new_clips_still_converges_metadata(conn):
     assert (src, float(ratio)) == ("deezer", 0.2)  # ...but metadata converged
 
 
-def test_supersede_flips_centroid_wholesale(conn):
+def test_supersede_flips_centroid_wholesale(conn, tmp_path):
     # deezer embeds first (thin); bandcamp supersedes — centroid must rebuild
     # from bandcamp clips only and embedding_source must flip.
     a = _artist(conn)
     _tracks(conn, a, "deezer", 1, "zz-cas-sd")
-    _tracks(conn, a, "bandcamp", 3, "zz-cas-sb")
+    _tracks(conn, a, "bandcamp", 3, "zz-cas-sb", tmp_path)
     emb = MockEmbedder(dim=8, name="mock-model")
     embed_artist_clips(conn, emb, a, source="deezer", signal_ratio=0.1)
     embed_artist_clips(conn, emb, a, source="bandcamp", signal_ratio=1.0)
-    src, clip_count, ratio = conn.execute(
-        "SELECT a.embedding_source, ae.clip_count, ae.signal_ratio FROM artist a "
-        "JOIN artist_embedding ae ON ae.artist_id = a.id AND ae.model = 'mock-model' WHERE a.id = %s",
+    src, clip_count, ratio, dz_clips = conn.execute(
+        "SELECT a.embedding_source, ae.clip_count, ae.signal_ratio, "
+        "  (SELECT count(*) FROM clip_embedding ce JOIN audio_track t ON t.id = ce.track_id "
+        "   WHERE t.artist_id = a.id AND t.platform = 'deezer') "
+        "FROM artist a JOIN artist_embedding ae ON ae.artist_id = a.id AND ae.model = 'mock-model' "
+        "WHERE a.id = %s",
         (a,),
     ).fetchone()
-    assert (src, clip_count) == ("bandcamp", 3)  # not 4: purity, not blend
-    assert ratio == 1.0
+    assert src == "bandcamp"
+    assert dz_clips == 1  # the deezer clip still exists as a row...
+    assert clip_count > dz_clips and ratio == 1.0  # ...but the centroid is bandcamp-only
+    # bandcamp tracks window into multiple clips each (90s → 2-3 windows)
+    assert clip_count >= 3 * 2

@@ -17,11 +17,19 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
+import soundfile as sf
 from psycopg import Connection
 
 from pipeline.bench.types import Clip, Embedder
+from pipeline.windows import peak_windows
 
 _DEFAULT_SEGMENT_S = 30
+# Full-track sources get RMS-peak windowing (ADR-017 §2 synthetic previews);
+# preview sources embed their file whole.
+WINDOWED_PLATFORMS = {"bandcamp", "soundcloud", "youtube"}
+WINDOWS_PER_TRACK = 4   # 3 tracks x 4 windows ≈ the 10-12 Deezer-preview budget
+TRACKS_PER_SOURCE = 3   # full-track sources: floor=3 tracks, newest across releases
+MIN_TRACK_S = 60        # skits/intros pollute windows; allowed only when nothing else
 
 
 class AudioFetchError(RuntimeError):
@@ -39,7 +47,10 @@ def pending_tracks(conn: Connection, artist_id: str, model: str, source: str | N
     """
     return conn.execute(
         """
-        SELECT t.id, t.audio_url, t.duration_s, t.platform, t.platform_track_id
+        SELECT t.id, t.audio_url, t.duration_s, t.platform, t.platform_track_id,
+               t.binding_evidence->>'album_path',
+               (t.binding_evidence->>'release_index')::int,
+               (t.binding_evidence->>'track_index')::int
         FROM audio_track t
         WHERE t.artist_id = %s
           AND (%s::text IS NULL OR t.platform = %s)
@@ -47,9 +58,9 @@ def pending_tracks(conn: Connection, artist_id: str, model: str, source: str | N
           AND t.verification_status NOT IN ('rejected','quarantined')
           AND NOT EXISTS (
               SELECT 1 FROM clip_embedding ce
-              WHERE ce.track_id = t.id AND ce.segment_start_s = 0 AND ce.model = %s
+              WHERE ce.track_id = t.id AND ce.model = %s
           )
-        ORDER BY t.discovered_at
+        ORDER BY t.discovered_at, t.id
         """,
         (artist_id, source, source, model),
     ).fetchall()
@@ -144,7 +155,51 @@ def _default_refresher(conn: Connection, platform: str, platform_track_id: str) 
         from pipeline.sources.deezer import refresh_preview
 
         return refresh_preview(conn, platform_track_id)
+    if platform == "bandcamp":
+        from pipeline.sources.bandcamp import refresh_bandcamp
+
+        return refresh_bandcamp(conn, platform_track_id)
     return None
+
+
+def _select_for_source(pending: list[tuple], source: str | None) -> list[tuple]:
+    """Full-track sources embed 3 tracks, newest across DISTINCT releases
+    (insert order = discography order = newest-first); <60s tracks only when
+    nothing longer exists. Preview sources embed everything pending."""
+    if source not in WINDOWED_PLATFORMS:
+        return pending
+    eligible = [r for r in pending if (r[2] or 0) >= MIN_TRACK_S] or list(pending)
+    # newest-first by the discovery walk order recorded in evidence — NOT by
+    # row order (uuid pks make physical order a lottery)
+    eligible.sort(key=lambda r: (r[6] is None, r[6], r[7] is None, r[7]))
+    chosen: list[tuple] = []
+    seen_releases: set = set()
+    for row in eligible:  # pass 1: one track per release
+        if row[5] not in seen_releases:
+            chosen.append(row)
+            seen_releases.add(row[5])
+        if len(chosen) == TRACKS_PER_SOURCE:
+            return chosen
+    for row in eligible:  # pass 2: fill from anywhere
+        if row not in chosen:
+            chosen.append(row)
+            if len(chosen) == TRACKS_PER_SOURCE:
+                break
+    return chosen
+
+
+def _clips_for_track(path: str, platform: str, duration_s: int | None, workdir: Path, track_key: str) -> list:
+    """(seg_start_s, seg_end_s, clip_path) per clip this track contributes."""
+    if platform not in WINDOWED_PLATFORMS:
+        return [(0, duration_s or _DEFAULT_SEGMENT_S, path)]
+    data, sr = sf.read(path, dtype="float32", always_2d=True)
+    mono = data.mean(axis=1)
+    out = []
+    for start_s, end_s in peak_windows(mono, sr, k=WINDOWS_PER_TRACK):
+        clip_path = workdir / f"{track_key}-w{start_s}.wav"
+        sf.write(clip_path, mono[start_s * sr:end_s * sr], sr)
+        out.append((start_s, end_s, str(clip_path)))
+    return out
 
 
 def embed_artist_clips(
@@ -180,11 +235,12 @@ def embed_artist_clips(
                 conn.execute("UPDATE artist SET embedding_source = %s WHERE id = %s", (source, artist_id))
         return 0
 
+    selected = _select_for_source(pending, source)
     embedded = 0
     with tempfile.TemporaryDirectory(prefix="embed-") as tmp:
         workdir = Path(tmp)
-        usable: list[tuple[tuple, str]] = []
-        for tid, url, duration_s, platform, ptid in pending:
+        usable: list[tuple] = []  # (track_id, seg_start, seg_end, clip_path)
+        for tid, url, duration_s, platform, ptid, _release, _ri, _ti in selected:
             try:
                 path = fetch(url, workdir)
             except AudioFetchError:
@@ -195,17 +251,18 @@ def embed_artist_clips(
                     path = fetch(fresh, workdir)
                 except AudioFetchError:
                     continue  # refreshed URL still broken — skip
-            usable.append(((tid, duration_s), path))
+            for seg in _clips_for_track(path, platform, duration_s, workdir, str(tid)):
+                usable.append((tid, *seg))
         if not usable:
             return 0
-        clips = [Clip(id=str(tid), artist_id=artist_id, path=path) for (tid, _), path in usable]
+        clips = [Clip(id=f"{tid}:{s}", artist_id=artist_id, path=path) for tid, s, _e, path in usable]
         vectors = embedder.embed(clips)
 
-        for ((tid, duration_s), _path), vec in zip(usable, vectors, strict=True):
+        for (tid, seg_start, seg_end, _path), vec in zip(usable, vectors, strict=True):
             conn.execute(
                 "INSERT INTO clip_embedding (track_id, segment_start_s, segment_end_s, model, dim, embedding) "
-                "VALUES (%s, 0, %s, %s, %s, %s)",
-                (tid, duration_s or _DEFAULT_SEGMENT_S, embedder.name, len(vec), _vec_text(vec)),
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (tid, seg_start, seg_end, embedder.name, len(vec), _vec_text(vec)),
             )
             embedded += 1
     refresh_artist_centroid(conn, artist_id, embedder.name, source, signal_ratio)

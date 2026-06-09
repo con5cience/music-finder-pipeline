@@ -122,6 +122,29 @@ async def discover_deezer_tracks(artist_id: str) -> int:
     return await asyncio.to_thread(_discover_deezer_sync, artist_id)
 
 
+def _discover_bandcamp_sync(artist_id: str) -> int:
+    from pipeline.sources.bandcamp import discover_bandcamp
+
+    settings = Settings()
+    with psycopg.connect(settings.database_url) as conn:
+        row = conn.execute(
+            "SELECT platform_id FROM platform_identity WHERE platform = 'bandcamp' AND artist_id = %s",
+            (artist_id,),
+        ).fetchone()
+        if row is None:
+            return 0
+        n = discover_bandcamp(conn, artist_id, row[0])
+        conn.commit()
+    return n
+
+
+@activity.defn
+async def discover_bandcamp_tracks(artist_id: str) -> int:
+    """Walk the artist's Bandcamp discography (rate-capped on bandcamp-io);
+    store ALL streamable tracks. Returns new audio_track rows written."""
+    return await asyncio.to_thread(_discover_bandcamp_sync, artist_id)
+
+
 @functools.cache
 def _embedder():
     # Lazy: torch + model deps only load in workers that run this activity.

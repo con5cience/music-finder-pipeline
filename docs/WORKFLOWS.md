@@ -131,7 +131,7 @@ sequenceDiagram
 
 | Built + verified live | Designed, not built (dashed) |
 |---|---|
-| MB bootstrap, Tier-A bind/classify, deezer-io discovery, fetch cache, embed path, centroids, seeder | Publish workflow, admin review wiring, B-tier search (3d), Bandcamp/SC/YT discovery, Tidal trickle |
+| MB bootstrap, Tier-A bind/classify, deezer-io + bandcamp-io discovery, fetch cache, windowed embed path (RMS peaks for full-track sources), centroids, cascade, seeder | Publish workflow, admin review wiring, B-tier search (3d), SC/YT discovery, Tidal trickle, ADR-015 Wave-1 analysis heads (fingerprint, MIR, integrity, tags) |
 
 **Explicitly not built and design-gated: crawler/search-based artist discovery.**
 Binding artists without an MB url-rel (platform search, evidence scoring,

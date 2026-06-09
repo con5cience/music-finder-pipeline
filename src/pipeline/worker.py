@@ -24,6 +24,7 @@ from pipeline.workflows import IngestArtistWorkflow
 # platform → IO activities (filled by the per-platform discovery slices).
 PLATFORM_ACTIVITIES: dict[str, list] = {platform: [] for platform in PLATFORM_QUEUES}
 PLATFORM_ACTIVITIES["deezer"] = [activities.discover_deezer_tracks]
+PLATFORM_ACTIVITIES["bandcamp"] = [activities.discover_bandcamp_tracks]
 
 
 def build_workers(client: Client, settings: Settings) -> list[Worker]:
