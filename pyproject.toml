@@ -71,6 +71,7 @@ worker = "python -m pipeline.worker"
 temporal = "temporal server start-dev"
 bench = "python -m pipeline.bench"
 fetch-clips = "python -m pipeline.bench.fetch_clips --file seeds/benchmark-artists.txt --out clips"
+mb-bootstrap = "python -m pipeline.mb_bootstrap"   # usage: uv run poe mb-bootstrap --dir ~/g/db-backups/mbdump-extract/mbdump
 check.sequence = ["lint", "test"]
 setup.sequence = ["db-up", "migrate"]   # post-`uv sync` convenience (full: ./scripts/bootstrap.sh)
 

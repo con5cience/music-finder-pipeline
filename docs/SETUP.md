@@ -230,9 +230,33 @@ muq-mulan-large     ...
 (`uv run poe bench` with no args runs a mock demo — shows the harness without any
 models installed.)
 
-## Data bootstrap (forthcoming slices)
+## Data bootstrap (MusicBrainz)
 
-- The MusicBrainz JSON artist dump is parked at
-  `~/g/db-backups/musicbrainz-json-artist-20260606.tar.xz`.
-- Import → per-artist `IngestArtistWorkflow` runs land in the next slices; this
-  doc gets a "bootstrap" section then.
+The corpus bootstraps from the MusicBrainz **Postgres fullexport** (NOT the JSON
+dumps — those exclude URL relationships entirely). Two archives are needed:
+
+- `mbdump.tar.bz2` (~7 GB) — core tables: artist, artist_alias, url,
+  l_artist_url, link, link_type.
+- `mbdump-derived.tar.bz2` (~0.5 GB) — user-generated tables: **artist_tag and
+  tag live here**, not in the core dump.
+
+Steps (the periodic refresh repeats these with a newer dump):
+
+```bash
+# 1. Find the latest export (published Wed + Sat)
+curl -s https://data.metabrainz.org/pub/musicbrainz/data/fullexport/LATEST
+# 2. Download both archives + MD5SUMS into ~/g/db-backups/ and verify md5sum
+# 3. Extract just the 8 tables (single pass per archive)
+tar -xjf mbdump.tar.bz2 -C mbdump-extract \
+  mbdump/artist mbdump/artist_alias mbdump/url mbdump/l_artist_url \
+  mbdump/link mbdump/link_type
+tar -xjf mbdump-derived.tar.bz2 -C mbdump-extract mbdump/artist_tag mbdump/tag
+# 4. Load + derive Tier-A identities (truncate-and-reload; ~3 min)
+uv run poe mb-bootstrap --dir ~/g/db-backups/mbdump-extract/mbdump
+```
+
+The loader fails fast if a table's column count drifts from the verified layout
+(see `EXPECTED_COLS` in `pipeline/mb_bootstrap.py`). 20260606 export yields
+~543k artists / ~1.03M Tier-A platform identities. Known coverage gap: YouTube
+`/user/...` and `/@handle` url-rels (~74k) are skipped until the YouTube slice
+adds channel-id resolution.
