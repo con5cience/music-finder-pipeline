@@ -19,6 +19,9 @@ with workflow.unsafe.imports_passed_through():
 
 _ACTIVITY_TIMEOUT = timedelta(seconds=30)
 _DISCOVERY_TIMEOUT = timedelta(minutes=5)  # platform IO behind a rate-capped queue
+# First embed on a fresh worker loads model weights (~30s) before downloading
+# ~12 previews + GPU inference; 30s would timeout-loop the weight load forever.
+_EMBED_TIMEOUT = timedelta(minutes=10)
 
 
 @dataclass
@@ -75,7 +78,7 @@ class IngestArtistWorkflow:
             )
 
         embedded = await workflow.execute_activity(
-            activities.embed_artist, inp.artist_id, start_to_close_timeout=_ACTIVITY_TIMEOUT
+            activities.embed_artist, inp.artist_id, start_to_close_timeout=_EMBED_TIMEOUT
         )
         return {
             "status": "embedded",

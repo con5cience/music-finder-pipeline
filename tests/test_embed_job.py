@@ -46,8 +46,10 @@ def test_embed_stores_stamped_rows(conn):
     n = embed_artist_clips(conn, _embedder(), a)
     assert n == 2
     rows = conn.execute(
-        "SELECT track_id, segment_start_s, segment_end_s, model, dim, vector_dims(embedding) "
-        "FROM clip_embedding ORDER BY segment_end_s DESC"
+        "SELECT ce.track_id, ce.segment_start_s, ce.segment_end_s, ce.model, ce.dim, vector_dims(ce.embedding) "
+        "FROM clip_embedding ce JOIN audio_track t ON t.id = ce.track_id "
+        "WHERE t.artist_id = %s ORDER BY ce.segment_end_s DESC",
+        (a,),
     ).fetchall()
     assert rows == [(t1, 0, 30, "mock-model", 8, 8), (t2, 0, 25, "mock-model", 8, 8)]
 
@@ -57,7 +59,11 @@ def test_embed_is_idempotent_per_model(conn):
     _track(conn, a, "t1", "/audio/t1.mp3")
     assert embed_artist_clips(conn, _embedder(), a) == 1
     assert embed_artist_clips(conn, _embedder(), a) == 0  # nothing pending second time
-    assert conn.execute("SELECT count(*) FROM clip_embedding").fetchone()[0] == 1
+    n = conn.execute(
+        "SELECT count(*) FROM clip_embedding ce JOIN audio_track t ON t.id = ce.track_id WHERE t.artist_id = %s",
+        (a,),
+    ).fetchone()[0]
+    assert n == 1
 
 
 def test_second_model_is_additive(conn):
@@ -66,7 +72,14 @@ def test_second_model_is_additive(conn):
     _track(conn, a, "t1", "/audio/t1.mp3")
     embed_artist_clips(conn, _embedder(), a)
     embed_artist_clips(conn, MockEmbedder(dim=8, name="mock-model-v2"), a)
-    models = {r[0] for r in conn.execute("SELECT model FROM clip_embedding").fetchall()}
+    models = {
+        r[0]
+        for r in conn.execute(
+            "SELECT ce.model FROM clip_embedding ce JOIN audio_track t ON t.id = ce.track_id "
+            "WHERE t.artist_id = %s",
+            (a,),
+        ).fetchall()
+    }
     assert models == {"mock-model", "mock-model-v2"}
 
 

@@ -21,10 +21,15 @@ MBID = "00000000-feed-4bad-9bad-000000000333"
 
 
 def _fixture_body(artist_id: int = 6281) -> bytes:
-    """Real fixture, with track artist ids rewritten to the synthetic artist."""
+    """Real fixture, with artist AND track ids rewritten to synthetic ones.
+
+    The capture carries real Deezer track ids; the shared factory DB holds real
+    corpus rows for those ids (UNIQUE platform+track would swallow inserts).
+    """
     d = json.loads(FIXTURE.read_text())
-    for t in d["data"]:
+    for i, t in enumerate(d["data"]):
         t["artist"]["id"] = artist_id
+        t["id"] = 990000002000 + i
     return json.dumps(d).encode()
 
 

@@ -33,6 +33,11 @@ def build_workers(client: Client, settings: Settings) -> list[Worker]:
             task_queue=settings.temporal_task_queue,
             workflows=[IngestArtistWorkflow],
             activities=[activities.classify_page, activities.bind_source, activities.embed_artist],
+            # One GPU: concurrent embed_artist threads contend for VRAM (MuQ +
+            # activations × N). 2 keeps the GPU fed without OOM risk; classify/
+            # bind are ms-scale DB reads and don't need more. Revisit when embed
+            # moves to its own queue.
+            max_concurrent_activities=2,
         )
     ]
     for platform, cfg in PLATFORM_QUEUES.items():
