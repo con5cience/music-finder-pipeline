@@ -16,13 +16,26 @@ command -v uv     >/dev/null || { echo "  missing: uv (https://astral.sh/uv)"; e
 command -v docker >/dev/null || { echo "  missing: docker"; exit 1; }
 command -v temporal >/dev/null || echo "  note: 'temporal' CLI not found — needed to run the worker (see docs/SETUP.md)"
 
+# Fresh Ubuntu installs need sudo for docker until you log out/in to pick up the
+# 'docker' group. Detect daemon access and fall back to sudo so bootstrap works
+# either way.
+DOCKER=(docker)
+if ! docker info >/dev/null 2>&1; then
+  if sudo docker info >/dev/null 2>&1; then
+    DOCKER=(sudo docker)
+    echo "  note: using sudo for docker (add \$USER to the 'docker' group + re-login to drop it)"
+  else
+    echo "  error: cannot reach the Docker daemon (is it installed and running?)"; exit 1
+  fi
+fi
+
 echo "==> uv sync ${groups[*]}"
 uv sync "${groups[@]}"
 
 echo "==> starting Postgres (compose db)"
-docker compose up -d db
+"${DOCKER[@]}" compose up -d db
 echo "==> waiting for Postgres"
-until docker compose exec -T db pg_isready -U pipeline >/dev/null 2>&1; do sleep 1; done
+until "${DOCKER[@]}" compose exec -T db pg_isready -U pipeline >/dev/null 2>&1; do sleep 1; done
 
 echo "==> applying migrations"
 uv run alembic upgrade head
