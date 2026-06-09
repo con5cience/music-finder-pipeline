@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     # None → auto-detect (cuda/mps/cpu); pin via PIPELINE_DEVICE.
     device: str | None = None
 
+    # Analysis head. None → registry default (MuQ audio-only, ADR-016). Swap via
+    # PIPELINE_EMBEDDING_MODEL (e.g. "musicfm-msd" for the MIT/commercial-safe model).
+    # Whatever runs gets stamped on stored embeddings so a swap is a clean re-embed.
+    embedding_model: str | None = None
+
     @property
     def effective_device(self) -> str:
         return self.device or select_device()

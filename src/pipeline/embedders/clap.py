@@ -26,7 +26,12 @@ class ClapEmbedder(AudioEmbedder):
     name = "laion-clap-music"
     sample_rate = 48000
     supports_text = True
-    model_id = "laion/larger_clap_music"
+    # NB: laion/larger_clap_music ships a degenerate audio encoder under
+    # transformers 5.x — its audio embeddings collapse to a single direction
+    # (silence vs noise cosine ≈ 1.0), tanking separation/p@1. The same-arch
+    # larger_clap_general checkpoint loads correctly and scores best of all
+    # embedders on the benchmark, so we use it as the music-capable CLAP.
+    model_id = "laion/larger_clap_general"
 
     def _load(self) -> None:
         from transformers import ClapModel, ClapProcessor

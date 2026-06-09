@@ -27,9 +27,11 @@ dev = [
 models = [
     "torch>=2.2",
     "torchaudio>=2.2",
+    "torchvision>=0.17",
     "soundfile>=0.12",
     "transformers>=4.40",
     "nnaudio>=0.3.4",
+    "einops>=0.7",  # vendored MusicFM (_vendor/musicfm) needs it
 ]
 # MuQ / MuQ-MuLan — separate, heavier package; box-primarily.
 muq = [
@@ -43,6 +45,8 @@ packages = ["src/pipeline"]
 line-length = 120
 target-version = "py312"
 src = ["src", "tests"]
+# Vendored third-party model code (kept verbatim from upstream; see its VENDOR.md).
+extend-exclude = ["src/pipeline/embedders/_vendor"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
@@ -79,3 +83,4 @@ explicit = true
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
 torchaudio = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux'" }]

@@ -31,6 +31,10 @@ class AudioEmbedder(abc.ABC):
     name: str
     sample_rate: int
     supports_text: bool = False
+    # Clips per forward pass. Kept small so variable-length models (e.g. MERT,
+    # which feeds raw waveforms through conv stacks) don't blow up GPU memory on
+    # the longest clip in a batch. Override per-embedder if a model can take more.
+    batch_size: int = 8
 
     def __init__(self, device: str | None = None) -> None:
         self.device = device or select_device()
@@ -51,7 +55,14 @@ class AudioEmbedder(abc.ABC):
     def embed(self, clips: list[Clip]) -> list[list[float]]:
         self._ensure()
         wavs = [load_audio_mono(c.path, self.sample_rate) for c in clips if c.path]
+        out: list[torch.Tensor] = []
         with torch.no_grad():
-            feats = self._features(wavs)
-        feats = torch.nn.functional.normalize(feats.float(), dim=-1)
-        return feats.cpu().tolist()
+            for i in range(0, len(wavs), self.batch_size):
+                feats = self._features(wavs[i : i + self.batch_size])
+                feats = torch.nn.functional.normalize(feats.float(), dim=-1)
+                out.append(feats.cpu())
+                if self.device.startswith("cuda"):
+                    torch.cuda.empty_cache()
+        if not out:
+            return []
+        return torch.cat(out).tolist()
