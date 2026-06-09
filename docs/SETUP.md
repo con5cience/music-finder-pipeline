@@ -41,6 +41,7 @@ stable, named commands (easy to allow-list):
 | `uv run poe migrate-status` | `alembic current` |
 | `uv run poe worker` | `python -m pipeline.worker` |
 | `uv run poe temporal` | `temporal server start-dev` |
+| `uv run poe bench` | `python -m pipeline.bench` (model-eval + clap-cost demo) |
 
 ## Local dev (Mac)
 
@@ -101,6 +102,16 @@ uv run alembic downgrade -1        # roll back one
 uv run alembic current             # what's applied
 uv run alembic history             # full history
 ```
+
+## Benchmarks (`src/pipeline/bench/`)
+
+Model-agnostic harness comparing audio embedders on **throughput** (O4: clips/s,
+ms/clip) and **quality** (O1: same-artist clips cluster tighter than cross-artist
+— `separation` and `precision@1`). `uv run poe bench` runs a mock demo; a real
+model is added by implementing the `Embedder` protocol (`name` + `embed(clips)`)
+and registering it in `bench/__main__.py`. The candidate model shortlist
+(LAION-CLAP variants vs MERT/MusiCNN/…) is a tomorrow decision, researched before
+the box run.
 
 ## Data bootstrap (forthcoming slices)
 

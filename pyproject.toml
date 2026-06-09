@@ -52,4 +52,5 @@ migrate-new = "alembic revision -m"   # usage: uv run poe migrate-new "add embed
 migrate-status = "alembic current"
 worker = "python -m pipeline.worker"
 temporal = "temporal server start-dev"
+bench = "python -m pipeline.bench"
 check.sequence = ["lint", "test"]
