@@ -45,11 +45,14 @@ async def _env() -> WorkflowEnvironment:
 
 async def _run(env: WorkflowEnvironment, bind, signal: str | None = None) -> dict:
     tq = "test-" + uuid.uuid4().hex
-    async with Worker(
-        env.client,
-        task_queue=tq,
-        workflows=[IngestArtistWorkflow],
-        activities=[mock_classify, bind, mock_embed],
+    async with (
+        Worker(
+            env.client,
+            task_queue=tq,
+            workflows=[IngestArtistWorkflow],
+            activities=[mock_classify, bind, mock_embed],
+        ),
+        Worker(env.client, task_queue="gpu", activities=[mock_embed]),
     ):
         handle = await env.client.start_workflow(
             IngestArtistWorkflow.run,
@@ -106,6 +109,7 @@ async def test_deezer_platform_dispatches_discovery_on_io_queue():
             Worker(env.client, task_queue=tq, workflows=[IngestArtistWorkflow],
                    activities=[mock_classify, _mock_bind("A"), mock_embed]),
             Worker(env.client, task_queue="deezer-io", activities=[mock_discover]),
+            Worker(env.client, task_queue="gpu", activities=[mock_embed]),
         ):
             res = await env.client.execute_workflow(
                 IngestArtistWorkflow.run,

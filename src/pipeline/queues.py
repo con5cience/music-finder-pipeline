@@ -11,7 +11,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-WORKFLOW_QUEUE = "pipeline"  # workflows + non-IO activities (embed, db)
+WORKFLOW_QUEUE = "pipeline"  # workflows + fast DB activities (classify/bind)
+# GPU work is concurrency-capped (VRAM), not rate-capped: its own queue so slow
+# embeds never occupy the pipeline queue's slots and starve classify/bind
+# (observed live in the first calibration run: 2 shared slots → 9h ETA).
+GPU_QUEUE = "gpu"
 
 
 @dataclass(frozen=True)

@@ -18,7 +18,7 @@ from temporalio.worker import Worker
 
 from pipeline import activities
 from pipeline.config import Settings
-from pipeline.queues import PLATFORM_QUEUES
+from pipeline.queues import GPU_QUEUE, PLATFORM_QUEUES
 from pipeline.workflows import IngestArtistWorkflow
 
 # platform → IO activities (filled by the per-platform discovery slices).
@@ -32,13 +32,18 @@ def build_workers(client: Client, settings: Settings) -> list[Worker]:
             client,
             task_queue=settings.temporal_task_queue,
             workflows=[IngestArtistWorkflow],
+            # embed_artist stays registered here so embeds scheduled on this
+            # queue by pre-gpu-queue workflow runs still drain after upgrades.
             activities=[activities.classify_page, activities.bind_source, activities.embed_artist],
-            # One GPU: concurrent embed_artist threads contend for VRAM (MuQ +
-            # activations × N). 2 keeps the GPU fed without OOM risk; classify/
-            # bind are ms-scale DB reads and don't need more. Revisit when embed
-            # moves to its own queue.
+        ),
+        Worker(
+            client,
+            task_queue=GPU_QUEUE,
+            activities=[activities.embed_artist],
+            # One GPU: concurrent embeds contend for VRAM (MuQ + activations
+            # × N). 2 keeps it fed without OOM on the 15.5GB card.
             max_concurrent_activities=2,
-        )
+        ),
     ]
     for platform, cfg in PLATFORM_QUEUES.items():
         acts = PLATFORM_ACTIVITIES[platform]

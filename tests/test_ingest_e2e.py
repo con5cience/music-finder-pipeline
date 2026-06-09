@@ -56,11 +56,14 @@ async def test_tier_a_ingest_end_to_end(migrated_db):
 
     async with env:
         tq = "e2e-" + uuid.uuid4().hex
-        async with Worker(
-            env.client,
-            task_queue=tq,
-            workflows=[IngestArtistWorkflow],
-            activities=[activities.classify_page, activities.bind_source, activities.embed_artist],
+        async with (
+            Worker(
+                env.client,
+                task_queue=tq,
+                workflows=[IngestArtistWorkflow],
+                activities=[activities.classify_page, activities.bind_source, activities.embed_artist],
+            ),
+            Worker(env.client, task_queue="gpu", activities=[activities.embed_artist]),
         ):
             res = await env.client.execute_workflow(
                 IngestArtistWorkflow.run,

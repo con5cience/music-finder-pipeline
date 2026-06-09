@@ -15,7 +15,7 @@ from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
     from pipeline import activities
-    from pipeline.queues import DISCOVERY_ACTIVITIES, queue_for
+    from pipeline.queues import DISCOVERY_ACTIVITIES, GPU_QUEUE, queue_for
 
 _ACTIVITY_TIMEOUT = timedelta(seconds=30)
 _DISCOVERY_TIMEOUT = timedelta(minutes=5)  # platform IO behind a rate-capped queue
@@ -78,7 +78,10 @@ class IngestArtistWorkflow:
             )
 
         embedded = await workflow.execute_activity(
-            activities.embed_artist, inp.artist_id, start_to_close_timeout=_EMBED_TIMEOUT
+            activities.embed_artist,
+            inp.artist_id,
+            task_queue=GPU_QUEUE,
+            start_to_close_timeout=_EMBED_TIMEOUT,
         )
         return {
             "status": "embedded",

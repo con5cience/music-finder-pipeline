@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pipeline.queues import PLATFORM_QUEUES, WORKFLOW_QUEUE, queue_for
+from pipeline.queues import GPU_QUEUE, PLATFORM_QUEUES, WORKFLOW_QUEUE, queue_for
 
 
 def test_locked_platforms_have_queues():
@@ -24,6 +24,11 @@ def test_queue_names_are_namespaced():
     for platform, cfg in PLATFORM_QUEUES.items():
         assert cfg.name == f"{platform}-io"
         assert cfg.name != WORKFLOW_QUEUE
+        assert cfg.name != GPU_QUEUE
+
+
+def test_gpu_queue_is_distinct():
+    assert GPU_QUEUE not in (WORKFLOW_QUEUE, *(c.name for c in PLATFORM_QUEUES.values()))
 
 
 def test_queue_for_lookup():
