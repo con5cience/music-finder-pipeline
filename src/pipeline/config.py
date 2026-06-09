@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     # Whatever runs gets stamped on stored embeddings so a swap is a clean re-embed.
     embedding_model: str | None = None
 
+    # Fetch-cache blob root (ADR-017 §5): gzipped non-audio responses, indexed
+    # by the fetch_cache table. Point at big disk on the box.
+    fetch_cache_dir: str = "~/.cache/music-finder-pipeline/fetch-cache"
+
+    # Outbound proxy for crawl-heavy platforms (Deezer API, Bandcamp HTML —
+    # ADR-017 proxy law). None → direct. Never used for token-bearing platforms.
+    proxy_url: str | None = None
+
     @property
     def effective_device(self) -> str:
         return self.device or select_device()
