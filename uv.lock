@@ -563,6 +563,7 @@ dev = [
     { name = "ruff" },
 ]
 models = [
+    { name = "nnaudio" },
     { name = "soundfile" },
     { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux'" },
     { name = "torch", version = "2.12.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
@@ -591,6 +592,7 @@ dev = [
     { name = "ruff", specifier = ">=0.6" },
 ]
 models = [
+    { name = "nnaudio", specifier = ">=0.3.4" },
     { name = "soundfile", specifier = ">=0.12" },
     { name = "torch", marker = "sys_platform != 'linux'", specifier = ">=2.2" },
     { name = "torch", marker = "sys_platform == 'linux'", specifier = ">=2.2", index = "https://download.pytorch.org/whl/cu128" },

@@ -177,15 +177,51 @@ uv run alembic current             # what's applied
 uv run alembic history             # full history
 ```
 
-## Benchmarks (`src/pipeline/bench/`)
+## Running the benchmarks (`src/pipeline/bench/`)
 
-Model-agnostic harness comparing audio embedders on **throughput** (O4: clips/s,
-ms/clip) and **quality** (O1: same-artist clips cluster tighter than cross-artist
-— `separation` and `precision@1`). `uv run poe bench` runs a mock demo; a real
-model is added by implementing the `Embedder` protocol (`name` + `embed(clips)`)
-and registering it in `bench/__main__.py`. The candidate model shortlist
-(LAION-CLAP variants vs MERT/MusiCNN/…) is a tomorrow decision, researched before
-the box run.
+The harness compares audio embedders on **throughput** (O4) and **embedding
+quality** (O1: same-artist clips should cluster tighter than cross-artist).
+
+**Step 1 — assemble a small labeled clip set.** One folder per artist, audio
+files inside (`wav`/`flac`/`mp3`/`ogg`):
+
+```
+clips/
+  aphex-twin/   t1.flac  t2.flac  t3.mp3
+  burial/       t1.flac  t2.flac
+  ...
+```
+
+~5–10 artists *you know*, 3–5 tracks each; 30-second clips are fine. More
+artists/clips → a more reliable read.
+
+**Step 2 — run it** (first run downloads weights: CLAP ~600 MB, MERT ~400 MB,
+MuQ ~2 GB):
+
+```sh
+uv run --group models --group muq python -m pipeline.bench --clips clips/
+```
+
+Uses CUDA automatically on the box; force with `PIPELINE_DEVICE=cuda|cpu`.
+
+**Step 3 — read the table:**
+
+```
+model            clips/s   ms/clip   intra   inter     sep    p@1
+laion-clap-music    ...
+mert-v1-95M         ...
+muq-mulan-large     ...
+```
+
+- **O4 throughput** — `clips/s` / `ms/clip`. This is the cost number that decides
+  verify-then-clap vs clap-then-verify (ADR-015 O4).
+- **O1 quality** — `sep` (`intra − inter`; higher = same-artist clusters tighter)
+  and `p@1` (fraction whose nearest neighbour is the same artist). Higher is
+  better. Pick the best `sep`/`p@1` at acceptable throughput; joint audio-text
+  models (CLAP, MuQ) also give tags for free — the tie-breaker.
+
+(`uv run poe bench` with no args runs a mock demo — shows the harness without any
+models installed.)
 
 ## Data bootstrap (forthcoming slices)
 

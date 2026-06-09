@@ -1,38 +1,31 @@
-"""Discover constructible embedders (those whose deps import).
+"""Discover constructible embedders — those whose model deps are installed.
 
-`available_embedders()` returns the embedders the current environment can build —
-torch present → CLAP/MERT/MuQ classes import; the heavier transformers/muq weights
-load lazily on first `embed`. Used by the bench to run real models on the box.
+`available_embedders()` returns the embedders this environment can actually run
+(transformers present → CLAP/MERT; muq present → MuQ-MuLan). Weights load lazily
+on first `embed`. Used by the bench to run real models on the box.
 """
 
 from __future__ import annotations
 
+import importlib.util
+
 from pipeline.bench.types import Embedder
+
+
+def _has(module: str) -> bool:
+    return importlib.util.find_spec(module) is not None
 
 
 def available_embedders(device: str | None = None) -> list[Embedder]:
     out: list[Embedder] = []
-    for factory in (_clap, _mert, _muq):
-        try:
-            out.append(factory(device))
-        except Exception:  # noqa: BLE001 — missing optional deps → just omit it
-            pass
+    if _has("transformers"):
+        from pipeline.embedders.clap import ClapEmbedder
+        from pipeline.embedders.mert import MertEmbedder
+
+        out.append(ClapEmbedder(device))
+        out.append(MertEmbedder(device))
+    if _has("muq"):
+        from pipeline.embedders.muq import MuQMuLanEmbedder
+
+        out.append(MuQMuLanEmbedder(device))
     return out
-
-
-def _clap(device: str | None) -> Embedder:
-    from pipeline.embedders.clap import ClapEmbedder
-
-    return ClapEmbedder(device)
-
-
-def _mert(device: str | None) -> Embedder:
-    from pipeline.embedders.mert import MertEmbedder
-
-    return MertEmbedder(device)
-
-
-def _muq(device: str | None) -> Embedder:
-    from pipeline.embedders.muq import MuQMuLanEmbedder
-
-    return MuQMuLanEmbedder(device)
