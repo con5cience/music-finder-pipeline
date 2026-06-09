@@ -21,18 +21,66 @@ the prereqs (uv, Docker, Temporal CLI, NVIDIA driver) are system installs.
 | Temporal gRPC | `localhost:7233` |
 | Temporal Web UI | `localhost:8233` |
 
-## Prerequisites
+## Infrastructure prerequisites
+
+The only non-`uv` installs. The box (Ubuntu) needs all four; the Mac needs the
+first three (no GPU). Everything else comes from `uv.lock`.
+
+### 1. uv — both
 
 ```sh
-# uv (Python toolchain — installs/pins Python 3.12 itself)
 curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Docker (for the Postgres container)  — already present on the Mac
-
-# Temporal CLI (dev server + tctl-style tooling)
-brew install temporal                              # macOS
-curl -sSf https://temporal.download/cli.sh | sh    # Linux (adds ~/.temporalio/bin to PATH)
+source "$HOME/.local/bin/env"        # or restart the shell
+uv --version
 ```
+
+### 2. Docker — both (only runs the Postgres container)
+
+macOS: install Docker Desktop (`brew install --cask docker`) and launch it.
+
+Ubuntu (official apt repo — [docs](https://docs.docker.com/engine/install/ubuntu/)):
+
+```sh
+sudo apt-get update && sudo apt-get install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+  https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker "$USER"      # then log out/in so `docker` works without sudo
+docker compose version
+```
+
+(quick alternative: `curl -fsSL https://get.docker.com | sh`)
+
+### 3. Temporal CLI — both
+
+```sh
+brew install temporal                            # macOS
+curl -sSf https://temporal.download/cli.sh | sh  # Linux (adds ~/.temporalio/bin to PATH)
+temporal --version
+```
+
+### 4. NVIDIA driver — the box only
+
+```sh
+sudo ubuntu-drivers install          # picks the recommended driver for the 4070 Ti SUPER
+sudo reboot
+nvidia-smi                           # verify: shows driver version, CUDA version, the GPU
+```
+
+- If Secure Boot prompts for **MOK enrollment** on reboot, complete it or the
+  kernel module won't load.
+- **No CUDA *toolkit* and no NVIDIA Container Toolkit are needed:** the pinned
+  torch wheel bundles the CUDA runtime, and Docker here only runs Postgres (CPU)
+  — all GPU work is host-side via uv.
+- Docs: [Ubuntu NVIDIA driver guide](https://documentation.ubuntu.com/server/how-to/graphics/install-nvidia-drivers/).
+
+With the four in place: `WITH_MUQ=1 ./scripts/bootstrap.sh` (box) or
+`./scripts/bootstrap.sh` (Mac).
 
 ## Tasks (the "npm scripts" — `uv run poe <task>`)
 
