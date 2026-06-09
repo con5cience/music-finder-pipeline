@@ -58,11 +58,24 @@ docker compose version
 
 ### 3. Temporal CLI — both
 
+macOS:
+
 ```sh
-brew install temporal                            # macOS
-curl -sSf https://temporal.download/cli.sh | sh  # Linux (adds ~/.temporalio/bin to PATH)
+brew install temporal
+```
+
+Linux (official CDN binary — the archive contains just `LICENSE` + the `temporal`
+binary; use `arch=arm64` on ARM):
+
+```sh
+curl -fsSL "https://temporal.download/cli/archive/latest?platform=linux&arch=amd64" -o /tmp/temporal.tar.gz
+tar -xzf /tmp/temporal.tar.gz -C /tmp temporal
+sudo install /tmp/temporal /usr/local/bin/temporal
 temporal --version
 ```
+
+(simpler alternative on Ubuntu: `sudo snap install temporal`.)
+Docs: [Set up the Temporal CLI](https://docs.temporal.io/cli/setup-cli).
 
 ### 4. NVIDIA driver — the box only
 
