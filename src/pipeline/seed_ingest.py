@@ -21,27 +21,33 @@ from pipeline.config import Settings
 from pipeline.workflows import IngestArtistInput, IngestArtistWorkflow
 
 
-def workflow_id(platform: str, platform_id: str) -> str:
-    return f"ingest-{platform}-{platform_id}"
+def workflow_id(artist_id: str) -> str:
+    return f"ingest-artist-{artist_id}"
 
 
-def pending_identities(conn, platform: str | None, limit: int) -> list[tuple[str, str, str]]:
-    """(artist_id, platform, platform_id) candidates for ingest seeding.
+def pending_artists(conn, platform: str | None, limit: int) -> list[str]:
+    """Artist ids with at least one audio-role identity (optionally: on one
+    platform), for cascade seeding.
 
-    Deliberately unfiltered beyond the platform: idempotence lives in the
-    deterministic workflow id (Temporal rejects duplicates), so re-seeding the
-    same window is safe. A DB-side "already embedded" filter can be added when
-    seeding windows get large enough for the skip-roundtrips to matter.
+    Deliberately unfiltered beyond that: idempotence lives in the deterministic
+    workflow id (Temporal rejects duplicates) and in scan verdicts (a re-run
+    cascade skips scanned sources), so re-seeding the same window is safe.
     """
+    from pipeline.queues import EMBED_PRIORITY
+
     sql = """
-        SELECT pi.artist_id::text, pi.platform, pi.platform_id
+        SELECT DISTINCT pi.artist_id::text
         FROM platform_identity pi
         WHERE pi.artist_id IS NOT NULL
+          AND pi.platform = ANY(%(audio)s)
           AND (%(platform)s::text IS NULL OR pi.platform = %(platform)s)
-        ORDER BY pi.platform, pi.platform_id
+        ORDER BY 1
         LIMIT %(limit)s
     """
-    return conn.execute(sql, {"platform": platform, "limit": limit}).fetchall()
+    return [
+        r[0]
+        for r in conn.execute(sql, {"audio": EMBED_PRIORITY, "platform": platform, "limit": limit}).fetchall()
+    ]
 
 
 async def seed(platform: str | None, limit: int) -> tuple[int, int]:
@@ -49,13 +55,13 @@ async def seed(platform: str | None, limit: int) -> tuple[int, int]:
     client = await Client.connect(settings.temporal_address, namespace=settings.temporal_namespace)
     started = skipped = 0
     with psycopg.connect(settings.database_url) as conn:
-        rows = pending_identities(conn, platform, limit)
-    for artist_id, plat, pid in rows:
+        artist_ids = pending_artists(conn, platform, limit)
+    for artist_id in artist_ids:
         try:
             await client.start_workflow(
                 IngestArtistWorkflow.run,
-                IngestArtistInput(artist_id, plat, pid),
-                id=workflow_id(plat, pid),
+                IngestArtistInput(artist_id),
+                id=workflow_id(artist_id),
                 task_queue=settings.temporal_task_queue,
             )
             started += 1

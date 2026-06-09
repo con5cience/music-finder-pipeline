@@ -28,9 +28,11 @@ class AudioFetchError(RuntimeError):
     """A track's audio could not be materialized (HTTP error, non-audio body)."""
 
 
-def pending_tracks(conn: Connection, artist_id: str, model: str) -> list[tuple]:
+def pending_tracks(conn: Connection, artist_id: str, model: str, source: str | None = None) -> list[tuple]:
     """Embeddable tracks for an artist that this model hasn't embedded yet.
 
+    `source` filters to one platform — the centroid-purity path (ADR-017 §2):
+    an artist's embedding clips come from exactly one source at a time.
     Requires an audio_url and a non-rejected/quarantined verification status;
     excludes tracks that already have a row for (track, segment 0, model) so
     re-runs are idempotent.
@@ -40,6 +42,7 @@ def pending_tracks(conn: Connection, artist_id: str, model: str) -> list[tuple]:
         SELECT t.id, t.audio_url, t.duration_s, t.platform, t.platform_track_id
         FROM audio_track t
         WHERE t.artist_id = %s
+          AND (%s::text IS NULL OR t.platform = %s)
           AND t.audio_url IS NOT NULL
           AND t.verification_status NOT IN ('rejected','quarantined')
           AND NOT EXISTS (
@@ -48,7 +51,7 @@ def pending_tracks(conn: Connection, artist_id: str, model: str) -> list[tuple]:
           )
         ORDER BY t.discovered_at
         """,
-        (artist_id, model),
+        (artist_id, source, source, model),
     ).fetchall()
 
 
@@ -101,24 +104,37 @@ def _vec_text(vector: list[float]) -> str:
     return "[" + ",".join(repr(float(x)) for x in vector) + "]"
 
 
-def refresh_artist_centroid(conn: Connection, artist_id: str, model: str) -> None:
-    """Upsert the artist's centroid for one model: re-normalized mean of clips."""
+def refresh_artist_centroid(
+    conn: Connection,
+    artist_id: str,
+    model: str,
+    source: str | None = None,
+    signal_ratio: float | None = None,
+) -> None:
+    """Upsert the artist's centroid for one model: re-normalized mean of clips.
+
+    With `source`, only that platform's clips enter the centroid — this is
+    where centroid purity is ENFORCED, not just intended: a supersede simply
+    re-runs this with the new source and the centroid flips wholesale.
+    """
     conn.execute(
         """
-        INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, computed_at)
+        INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio, computed_at)
         SELECT t.artist_id, ce.model, max(ce.dim),
-               l2_normalize(avg(ce.embedding)), count(*), now()
+               l2_normalize(avg(ce.embedding)), count(*), %s, now()
         FROM clip_embedding ce
         JOIN audio_track t ON t.id = ce.track_id
         WHERE t.artist_id = %s AND ce.model = %s
+          AND (%s::text IS NULL OR t.platform = %s)
         GROUP BY t.artist_id, ce.model
         ON CONFLICT (artist_id, model) DO UPDATE SET
             dim = EXCLUDED.dim,
             embedding = EXCLUDED.embedding,
             clip_count = EXCLUDED.clip_count,
+            signal_ratio = EXCLUDED.signal_ratio,
             computed_at = EXCLUDED.computed_at
         """,
-        (artist_id, model),
+        (signal_ratio, artist_id, model, source, source),
     )
 
 
@@ -135,6 +151,8 @@ def embed_artist_clips(
     conn: Connection,
     embedder: Embedder,
     artist_id: str,
+    source: str | None = None,
+    signal_ratio: float | None = None,
     *,
     fetch=fetch_audio,
     refresher=_default_refresher,
@@ -146,8 +164,20 @@ def embed_artist_clips(
     poisoning the artist's batch — they stay pending for a later pass.
     Returns the number of clips embedded (0 = clean no-op, centroid untouched).
     """
-    pending = pending_tracks(conn, artist_id, embedder.name)
+    pending = pending_tracks(conn, artist_id, embedder.name, source)
     if not pending:
+        # Nothing NEW to embed — but a re-run must still converge metadata:
+        # if the source already has clips, restamp centroid/ratio/source so
+        # supersede-targeting and publish gating see backfilled values.
+        has_clips = conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM clip_embedding ce JOIN audio_track t ON t.id = ce.track_id "
+            "WHERE t.artist_id = %s AND ce.model = %s AND (%s::text IS NULL OR t.platform = %s))",
+            (artist_id, embedder.name, source, source),
+        ).fetchone()[0]
+        if has_clips:
+            refresh_artist_centroid(conn, artist_id, embedder.name, source, signal_ratio)
+            if source is not None:
+                conn.execute("UPDATE artist SET embedding_source = %s WHERE id = %s", (source, artist_id))
         return 0
 
     embedded = 0
@@ -178,5 +208,7 @@ def embed_artist_clips(
                 (tid, duration_s or _DEFAULT_SEGMENT_S, embedder.name, len(vec), _vec_text(vec)),
             )
             embedded += 1
-    refresh_artist_centroid(conn, artist_id, embedder.name)
+    refresh_artist_centroid(conn, artist_id, embedder.name, source, signal_ratio)
+    if source is not None and embedded:
+        conn.execute("UPDATE artist SET embedding_source = %s WHERE id = %s", (source, artist_id))
     return embedded

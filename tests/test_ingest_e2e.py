@@ -16,38 +16,36 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from pipeline import activities
-from pipeline.seed_ingest import pending_identities, workflow_id
+from pipeline.seed_ingest import pending_artists, workflow_id
 from pipeline.workflows import IngestArtistInput, IngestArtistWorkflow
 
 
-def _real_identity(db_url: str) -> tuple[str, str, str] | None:
-    from pipeline.queues import DISCOVERY_ACTIVITIES
+def _artist_without_audio_identities(db_url: str) -> str | None:
+    # An artist whose identities are ALL non-audio platforms (tidal/apple/...):
+    # the cascade has nothing to scan or embed → terminal 'unbound', no IO.
+    from pipeline.queues import EMBED_PRIORITY
 
-    # Pick a platform WITHOUT a discovery activity: this test's worker only
-    # polls the workflow queue, so a discoverable platform would park the
-    # workflow waiting for its {platform}-io queue.
     with psycopg.connect(db_url) as conn:
-        return conn.execute(
+        row = conn.execute(
             """
-            SELECT pi.artist_id::text, pi.platform, pi.platform_id
+            SELECT pi.artist_id::text
             FROM platform_identity pi
-            WHERE pi.platform != ALL(%s)
-              AND NOT EXISTS (
-                SELECT 1 FROM audio_track t
-                WHERE t.artist_id = pi.artist_id AND t.audio_url IS NOT NULL
-            )
-            ORDER BY pi.platform, pi.platform_id
+            GROUP BY pi.artist_id
+            HAVING bool_and(pi.platform != ALL(%s))
+            ORDER BY pi.artist_id
             LIMIT 1
             """,
-            (list(DISCOVERY_ACTIVITIES),),
+            (EMBED_PRIORITY,),
         ).fetchone()
+        return row[0] if row else None
 
 
-async def test_tier_a_ingest_end_to_end(migrated_db):
-    ident = _real_identity(migrated_db)
-    if ident is None:
-        pytest.skip("no bootstrapped identities (run `poe mb-bootstrap` first)")
-    artist_id, platform, platform_id = ident
+async def test_cascade_ingest_end_to_end_unbound(migrated_db):
+    # Real activities + a real bootstrapped artist with zero audio-role
+    # identities: proves wiring (plan → unbound) with no network or GPU.
+    artist_id = _artist_without_audio_identities(migrated_db)
+    if artist_id is None:
+        pytest.skip("no bootstrapped artists (run `poe mb-bootstrap` first)")
 
     try:
         env = await WorkflowEnvironment.start_time_skipping()
@@ -56,44 +54,45 @@ async def test_tier_a_ingest_end_to_end(migrated_db):
 
     async with env:
         tq = "e2e-" + uuid.uuid4().hex
-        async with (
-            Worker(
-                env.client,
-                task_queue=tq,
-                workflows=[IngestArtistWorkflow],
-                activities=[activities.classify_page, activities.bind_source, activities.embed_artist],
-            ),
-            Worker(env.client, task_queue="gpu", activities=[activities.embed_artist]),
+        async with Worker(
+            env.client,
+            task_queue=tq,
+            workflows=[IngestArtistWorkflow],
+            activities=[
+                activities.cascade_plan,
+                activities.record_scan,
+                activities.choose_embed_source,
+                activities.embed_artist,
+            ],
         ):
             res = await env.client.execute_workflow(
                 IngestArtistWorkflow.run,
-                IngestArtistInput(artist_id, platform, platform_id),
+                IngestArtistInput(artist_id),
                 id="e2e-" + uuid.uuid4().hex,
                 task_queue=tq,
             )
-    assert res["status"] == "embedded"
-    assert res["tier"] == "A"
-    assert res["page_type"] == "artist"
-    assert res["embedded"] == 0  # chosen artist has no embeddable tracks
+    assert res == {"status": "unbound"}
 
 
 def test_workflow_id_is_deterministic():
-    assert workflow_id("deezer", "123") == "ingest-deezer-123"
-    assert workflow_id("deezer", "123") == workflow_id("deezer", "123")
+    assert workflow_id("abc-123") == "ingest-artist-abc-123"
+    assert workflow_id("abc-123") == workflow_id("abc-123")
 
 
-def test_pending_identities_filters_by_platform(conn):
+def test_pending_artists_audio_role_only(conn):
     a = conn.execute(
         "INSERT INTO artist (display_name, mbid) VALUES ('Seed Fixture', '00000000-feed-4bad-9bad-000000000777') "
         "RETURNING id"
     ).fetchone()[0]
-    for plat, pid in [("deezer", "zz-seed-d1"), ("bandcamp", "zz-seed-b1")]:
-        conn.execute(
-            "INSERT INTO platform_identity (artist_id, platform, platform_id, page_type) "
-            "VALUES (%s, %s, %s, 'artist')",
-            (a, plat, pid),
-        )
-    rows = pending_identities(conn, "deezer", limit=10_000_000)
-    plats = {r[1] for r in rows}
-    assert plats == {"deezer"}
-    assert any(r[2] == "zz-seed-d1" for r in rows)
+    a2 = conn.execute(
+        "INSERT INTO artist (display_name, mbid) VALUES ('Tidal Only', '00000000-feed-4bad-9bad-000000000778') "
+        "RETURNING id"
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO platform_identity (artist_id, platform, platform_id, page_type) "
+        "VALUES (%s, 'deezer', 'zz-seed-d1', 'artist'), (%s, 'tidal', 'zz-seed-t1', 'artist')",
+        (a, a2),
+    )
+    ids = pending_artists(conn, None, limit=10_000_000)
+    assert str(a) in ids
+    assert str(a2) not in ids  # tidal-only: playback asset, no audio cascade

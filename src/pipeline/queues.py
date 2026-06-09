@@ -50,3 +50,10 @@ def queue_for(platform: str) -> str:
 DISCOVERY_ACTIVITIES: dict[str, str] = {
     "deezer": "discover_deezer_tracks",
 }
+
+# Audio-signal cascade (ADR-017 §2, floors per user decision 2026-06-09):
+# priority order tried until a source meets its floor; floors double as
+# equal-signal normalizers (10 previews ≈ 3 full tracks). None = experimental —
+# the source is scanned and its yield recorded, but it never auto-embeds.
+EMBED_PRIORITY: list[str] = ["deezer", "bandcamp", "soundcloud", "youtube"]
+EMBED_FLOORS: dict[str, int | None] = {"deezer": 10, "bandcamp": 3, "soundcloud": 3, "youtube": None}

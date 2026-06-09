@@ -34,7 +34,14 @@ def build_workers(client: Client, settings: Settings) -> list[Worker]:
             workflows=[IngestArtistWorkflow],
             # embed_artist stays registered here so embeds scheduled on this
             # queue by pre-gpu-queue workflow runs still drain after upgrades.
-            activities=[activities.classify_page, activities.bind_source, activities.embed_artist],
+            activities=[
+                activities.classify_page,
+                activities.bind_source,
+                activities.cascade_plan,
+                activities.record_scan,
+                activities.choose_embed_source,
+                activities.embed_artist,
+            ],
         ),
         Worker(
             client,

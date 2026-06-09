@@ -1,7 +1,8 @@
-"""IngestArtistWorkflow orchestration + the human-review signal gate.
+"""Cascade IngestArtistWorkflow orchestration (mocked activities).
 
-Uses Temporal's time-skipping test environment with mocked activities. Skips
-cleanly if the test server can't be fetched (offline), like the DB tests.
+Time-skipping Temporal env; skips cleanly when the test server is unavailable.
+Covers: floor-met early exit, thin-source fallback embed, unbound, no_signal,
+and the no-flow-yet platform skip.
 """
 
 from __future__ import annotations
@@ -16,24 +17,40 @@ from temporalio.worker import Worker
 from pipeline.workflows import IngestArtistInput, IngestArtistWorkflow
 
 
-@activity.defn(name="classify_page")
-async def mock_classify(platform: str, platform_id: str) -> str:
-    return "artist"
+def _mock_plan(pending, has_audio=True):
+    @activity.defn(name="cascade_plan")
+    async def plan(artist_id: str) -> dict:
+        return {"has_audio_identities": has_audio, "pending": pending}
+
+    return plan
 
 
-def _mock_bind(tier: str | None):
-    @activity.defn(name="bind_source")
-    async def bind(artist_id: str, platform: str, platform_id: str) -> dict | None:
-        if tier is None:
-            return None
-        return {"tier": tier, "track_count": 3}
+def _mock_record_scan(total_yield: int, calls: list | None = None):
+    @activity.defn(name="record_scan")
+    async def record(artist_id: str, platform: str, platform_id: str) -> int:
+        if calls is not None:
+            calls.append(platform)
+        return total_yield
 
-    return bind
+    return record
+
+
+def _mock_choose(result):
+    @activity.defn(name="choose_embed_source")
+    async def choose(artist_id: str) -> dict | None:
+        return result
+
+    return choose
 
 
 @activity.defn(name="embed_artist")
-async def mock_embed(artist_id: str) -> int:
-    return 3
+async def mock_embed(artist_id: str, source: str | None = None, ratio: float | None = None) -> int:
+    return 12
+
+
+@activity.defn(name="discover_deezer_tracks")
+async def mock_discover(artist_id: str) -> int:
+    return 12
 
 
 async def _env() -> WorkflowEnvironment:
@@ -43,79 +60,74 @@ async def _env() -> WorkflowEnvironment:
         pytest.skip(f"Temporal test server unavailable: {exc}")
 
 
-async def _run(env: WorkflowEnvironment, bind, signal: str | None = None) -> dict:
+async def _run(env: WorkflowEnvironment, plan, record, choose) -> dict:
     tq = "test-" + uuid.uuid4().hex
     async with (
-        Worker(
-            env.client,
-            task_queue=tq,
-            workflows=[IngestArtistWorkflow],
-            activities=[mock_classify, bind, mock_embed],
-        ),
+        Worker(env.client, task_queue=tq, workflows=[IngestArtistWorkflow],
+               activities=[plan, record, choose, mock_embed]),
+        Worker(env.client, task_queue="deezer-io", activities=[mock_discover]),
         Worker(env.client, task_queue="gpu", activities=[mock_embed]),
     ):
-        handle = await env.client.start_workflow(
+        return await env.client.execute_workflow(
             IngestArtistWorkflow.run,
-            IngestArtistInput("a1", "soundcloud", "111"),
+            IngestArtistInput("a1"),
             id="wf-" + uuid.uuid4().hex,
             task_queue=tq,
         )
-        if signal is not None:
-            await handle.signal(IngestArtistWorkflow.submit_review_decision, signal)
-        return await handle.result()
 
 
-async def test_tier_a_auto_embeds():
+async def test_floor_met_embeds_from_winner():
     env = await _env()
     async with env:
-        res = await _run(env, _mock_bind("A"))
+        res = await _run(
+            env,
+            _mock_plan([["deezer", "d1"]]),
+            _mock_record_scan(12),  # >= deezer floor 10
+            _mock_choose({"source": "deezer", "ratio": 1.2}),
+        )
     assert res["status"] == "embedded"
-    assert res["tier"] == "A"
-    assert res["embedded"] == 3
+    assert (res["source"], res["scanned"], res["embedded"]) == ("deezer", 1, 12)
 
 
-async def test_tier_c_blocks_until_approved():
+async def test_thin_source_still_embeds_with_ratio():
     env = await _env()
     async with env:
-        res = await _run(env, _mock_bind("C"), signal="approved")
+        res = await _run(
+            env,
+            _mock_plan([["deezer", "d1"]]),
+            _mock_record_scan(2),  # under floor — cascade exhausts, thin fallback
+            _mock_choose({"source": "deezer", "ratio": 0.2}),
+        )
     assert res["status"] == "embedded"
+    assert res["ratio"] == 0.2
 
 
-async def test_tier_c_rejected_by_review():
+async def test_no_audio_identities_is_unbound():
     env = await _env()
     async with env:
-        res = await _run(env, _mock_bind("C"), signal="rejected")
-    assert res["status"] == "rejected_by_review"
+        res = await _run(env, _mock_plan([], has_audio=False), _mock_record_scan(0), _mock_choose(None))
+    assert res == {"status": "unbound"}
 
 
-async def test_unbindable_identity_ends_unbound():
+async def test_nothing_usable_is_no_signal():
     env = await _env()
     async with env:
-        res = await _run(env, _mock_bind(None))
-    assert res["status"] == "unbound"
-    assert "embedded" not in res
+        res = await _run(env, _mock_plan([["deezer", "d1"]]), _mock_record_scan(0), _mock_choose(None))
+    assert res["status"] == "no_signal"
 
 
-@activity.defn(name="discover_deezer_tracks")
-async def mock_discover(artist_id: str) -> int:
-    return 7
-
-
-async def test_deezer_platform_dispatches_discovery_on_io_queue():
+async def test_platform_without_flow_is_skipped_not_fatal():
+    # bandcamp has no discovery activity yet: identity stays pending, the
+    # cascade moves on, and choose still runs (an earlier-scanned source or
+    # nothing may win).
     env = await _env()
+    calls: list = []
     async with env:
-        tq = "test-" + uuid.uuid4().hex
-        async with (
-            Worker(env.client, task_queue=tq, workflows=[IngestArtistWorkflow],
-                   activities=[mock_classify, _mock_bind("A"), mock_embed]),
-            Worker(env.client, task_queue="deezer-io", activities=[mock_discover]),
-            Worker(env.client, task_queue="gpu", activities=[mock_embed]),
-        ):
-            res = await env.client.execute_workflow(
-                IngestArtistWorkflow.run,
-                IngestArtistInput("a1", "deezer", "6281"),
-                id="wf-" + uuid.uuid4().hex,
-                task_queue=tq,
-            )
+        res = await _run(
+            env,
+            _mock_plan([["bandcamp", "b1"], ["deezer", "d1"]]),
+            _mock_record_scan(12, calls),
+            _mock_choose({"source": "deezer", "ratio": 1.2}),
+        )
     assert res["status"] == "embedded"
-    assert res["discovered"] == 7  # came from the deezer-io worker
+    assert calls == ["deezer"]  # bandcamp never scanned (no flow), deezer was

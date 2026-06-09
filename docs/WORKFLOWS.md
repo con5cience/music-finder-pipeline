@@ -6,59 +6,67 @@ designed-but-not-built; everything solid has run for real against the factory
 DB. Verified live 2026-06-09: Burial (deezer 6281) — 12 tracks discovered,
 12 MuQ clips embedded, centroid committed.
 
-## IngestArtistWorkflow — per-artist orchestration
+## IngestArtistWorkflow — the audio-source cascade
 
-One workflow per (artist × platform identity), id `ingest-{platform}-{platform_id}`
-(deterministic → seeding is idempotent). The Tier-C park is the reason Temporal
-exists here: a parked workflow survives crashes for as long as review takes.
+One workflow per ARTIST, id `ingest-artist-{artist_id}` (deterministic →
+re-seeding is idempotent; scan verdicts make re-runs cheap). The cascade walks
+the artist's audio-role identities in signal-priority order and embeds from
+exactly one source — centroid purity is enforced in SQL, not by convention.
 
 What each step actually does:
 
-1. **Classify** — "do we already know what kind of page this is?" A local DB
-   read: MB-derived pages were classified at bootstrap (artist/label/etc.).
-   No network. Unknown pages stay unknown until a future slice classifies live.
-2. **Bind** — "can we PROVE this page belongs to this artist?" Today the only
-   accepted proof is a MusicBrainz url-rel (→ Tier A). No proof → the workflow
-   ends `unbound` and **nothing is crawled, searched, or guessed**. Search/
-   crawler-based binding (Tier B/C evidence scoring) does not exist yet — it is
-   design-gated: thorough investigation + empirical testing before any code,
-   then the 1k-artist calibration before it touches the corpus (ADR-017 §3).
-3. **Review park (Tier C)** — when bind one day yields ambiguous evidence, the
-   workflow freezes here, crash-safe, until a human signals a verdict. Wired
-   but unreachable today (nothing produces Tier C yet).
-4. **Discover** — "ask the platform what this artist's tracks are." Runs on the
-   platform's own rate-capped queue through the fetch cache. Deezer only, so
-   far: top-12 previews, albums fallback, main-artist tracks only.
-5. **Embed** — "turn the tracks into corpus vectors." Download previews, run
-   MuQ on the GPU, store model-stamped clip vectors, refresh the artist's
-   centroid. The artist is now in the similarity space.
+1. **Plan** — "which of this artist's pages can carry audio, and which still
+   need scanning?" Local DB read over MB-derived identities. Tidal/Apple/Qobuz
+   are playback assets and never enter the cascade. No audio identities at all
+   → `unbound`; **nothing is crawled, searched, or guessed** (crawler binding
+   stays design-gated).
+2. **Cascade scan** — for each pending source in priority order (deezer →
+   bandcamp → soundcloud → youtube): discover its tracks on the platform's
+   rate-capped queue, write the TERMINAL scan verdict (`scanned`/`empty` —
+   transient errors leave `pending` for retry), and **stop early when a source
+   meets its floor** (deezer 10 · bc/sc 3 · yt experimental). Sources without
+   an ingestion flow yet are skipped and stay pending.
+3. **Choose** — floors double as equal-signal normalizers: first source meeting
+   its floor (priority order) wins; if none does, the best THIN source wins by
+   floor-ratio (2 BC tracks at 2/3 beat 1 Deezer preview at 1/10). Nothing
+   anywhere → `no_signal`.
+4. **Embed, source-locked** — download the winner's audio (self-healing URL
+   refresh on 403), MuQ on the GPU queue, stamped clips, centroid built ONLY
+   from the winning source's clips, `signal_ratio` recorded for downstream
+   gating, `artist.embedding_source` locked. A later richer source supersedes
+   by re-running this — the centroid flips wholesale, never blends.
 
 ```mermaid
 flowchart TD
-    START(["seeded from the Tier-A pool<br/>one run per artist × platform page"]) --> CLASSIFY
+    START(["seeded per ARTIST from the Tier-A pool"]) --> PLAN
 
     subgraph PQ ["task queue: pipeline"]
-        CLASSIFY["1 · What kind of page is this?<br/>local lookup — bootstrap already<br/>classified MB-derived pages"]
-        BIND["2 · Can we prove this page is this artist?<br/>only proof today: a MusicBrainz url-rel → Tier A<br/>no proof → stop; we never guess"]
-        EMBED["5 · Make the artist searchable<br/>download previews → MuQ on GPU →<br/>stamped vectors + artist centroid"]
+        PLAN["1 · Which pages can carry audio,<br/>which still need scanning?<br/>(playback-only platforms excluded)"]
+        VERDICT["2b · Record terminal scan verdict<br/>scanned / empty · errors stay pending"]
+        CHOOSE["3 · Pick the embedding source<br/>floor met (priority order), else<br/>best floor-ratio thin source"]
     end
 
-    CLASSIFY --> BIND
-    BIND -->|"no authoritative link"| UNBOUND(["unbound — artist skipped<br/>crawler/search binding: not built,<br/>design-gated (investigate first)"])
-    BIND -->|"ambiguous evidence (Tier C)<br/>unreachable today"| PARK["3 · ⏸ frozen for human review<br/>crash-safe, indefinitely"]
-    PARK -->|"reviewer verdict"| DECIDE{approved?}
-    DECIDE -->|no| REJECTED(["rejected — never embedded"])
-    DECIDE -->|yes| DISC
-    BIND -->|"proven (Tier A)"| DISC{does this platform have<br/>track discovery built?}
+    PLAN -->|"no audio identities"| UNBOUND(["unbound — never guessed<br/>(crawler binding: design-gated)"])
+    PLAN --> LOOP{next pending source<br/>in priority order?}
 
-    subgraph DQ ["task queue: deezer-io · server-capped 10/s"]
-        DDISC["4 · Ask Deezer for the artist's tracks<br/>top-12 previews, albums fallback,<br/>this artist's own tracks only, cached"]
+    subgraph DQ ["per-platform IO queues · server-rate-capped"]
+        DDISC["2a · Discover the artist's tracks<br/>(deezer-io 10/s live; bc/sc/yt later)<br/>own tracks only · fetch-cached"]
     end
 
-    DISC -->|deezer| DDISC
-    DISC -->|"not yet (bandcamp/sc/yt later)"| EMBED
-    DDISC --> EMBED
-    EMBED --> DONE(["embedded — in the corpus<br/>with tier + provenance recorded"])
+    LOOP -->|"has ingestion flow"| DDISC
+    LOOP -->|"no flow yet — skip,<br/>stays pending"| LOOP
+    DDISC --> VERDICT
+    VERDICT -->|"floor met → stop early"| CHOOSE
+    VERDICT -->|"under floor → continue"| LOOP
+    LOOP -->|exhausted| CHOOSE
+    CHOOSE -->|"nothing usable"| NOSIG(["no_signal — scanned, recorded,<br/>nothing worth embedding"])
+    CHOOSE -->|"winner + signal_ratio"| EMBED
+
+    subgraph GQ ["task queue: gpu · concurrency-capped"]
+        EMBED["4 · Embed source-locked<br/>self-healing URL refresh → MuQ →<br/>pure centroid + signal_ratio"]
+    end
+
+    EMBED --> DONE(["embedded — one source, ratio recorded,<br/>supersede-ready when richer sources land"])
 ```
 
 ## System data flow — bootstrap to corpus

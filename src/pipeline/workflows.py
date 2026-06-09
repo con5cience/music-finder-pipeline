@@ -1,9 +1,11 @@
-"""Per-artist ingest workflow.
+"""Per-artist ingest workflow: the audio-source cascade (ADR-017 §2).
 
-Durable orchestration: classify the page → bind a source under a verification
-tier → (Tier C blocks on a human-review SIGNAL) → embed. The human-in-the-
-loop gate is the reason for Temporal: a Tier-C binding parks the workflow,
-crash-safe, for as long as it takes a reviewer to decide.
+One run per ARTIST (not per identity): walk audio-role identities in
+EMBED_PRIORITY order, discover each pending source on its rate-capped queue,
+record terminal scan verdicts, stop early when a source meets its floor, then
+choose the winner (floor-met by priority, else best floor-ratio) and embed
+from exactly that source. Tier-B/C binding and its review park return in the
+B-tier slice; today's identities are all Tier-A (MB url-rels).
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from pipeline import activities
-    from pipeline.queues import DISCOVERY_ACTIVITIES, GPU_QUEUE, queue_for
+    from pipeline.queues import DISCOVERY_ACTIVITIES, EMBED_FLOORS, GPU_QUEUE, queue_for
 
 _ACTIVITY_TIMEOUT = timedelta(seconds=30)
 _DISCOVERY_TIMEOUT = timedelta(minutes=5)  # platform IO behind a rate-capped queue
@@ -31,68 +33,61 @@ _IO_RETRY = RetryPolicy(maximum_attempts=5)
 @dataclass
 class IngestArtistInput:
     artist_id: str
-    platform: str
-    platform_id: str
+
+
+def _meets_floor(platform: str, total_yield: int) -> bool:
+    floor = EMBED_FLOORS.get(platform)
+    return floor is not None and total_yield >= floor
 
 
 @workflow.defn
 class IngestArtistWorkflow:
-    def __init__(self) -> None:
-        self._review_decision: str | None = None
-
-    @workflow.signal
-    def submit_review_decision(self, decision: str) -> None:
-        """Reviewer's verdict on a Tier-C binding: 'approved' | 'rejected'."""
-        self._review_decision = decision
-
-    @workflow.query
-    def status(self) -> str:
-        return self._review_decision or "running"
-
     @workflow.run
     async def run(self, inp: IngestArtistInput) -> dict:
-        page_type = await workflow.execute_activity(
-            activities.classify_page,
-            args=[inp.platform, inp.platform_id],
-            start_to_close_timeout=_ACTIVITY_TIMEOUT,
+        plan = await workflow.execute_activity(
+            activities.cascade_plan, inp.artist_id, start_to_close_timeout=_ACTIVITY_TIMEOUT
         )
-        binding = await workflow.execute_activity(
-            activities.bind_source,
-            args=[inp.artist_id, inp.platform, inp.platform_id],
-            start_to_close_timeout=_ACTIVITY_TIMEOUT,
-        )
-        if binding is None:
-            # No authoritative link and no search path yet (B-tier slice).
-            return {"status": "unbound", "page_type": page_type}
+        if not plan["pending"] and not plan["has_audio_identities"]:
+            return {"status": "unbound"}  # no audio-role identity; crawler binding is design-gated
 
-        if binding["tier"] == "C":
-            # Park until a reviewer signals; Temporal persists this wait.
-            await workflow.wait_condition(lambda: self._review_decision is not None)
-            if self._review_decision != "approved":
-                return {"status": "rejected_by_review", "page_type": page_type}
-
-        discovered = 0
-        discovery = DISCOVERY_ACTIVITIES.get(inp.platform)
-        if discovery is not None:
-            discovered = await workflow.execute_activity(
+        scanned = 0
+        for platform, _platform_id in plan["pending"]:
+            discovery = DISCOVERY_ACTIVITIES.get(platform)
+            if discovery is None:
+                continue  # no ingestion flow built for this source yet — stays pending
+            await workflow.execute_activity(
                 discovery,
                 inp.artist_id,
-                task_queue=queue_for(inp.platform),
+                task_queue=queue_for(platform),
                 start_to_close_timeout=_DISCOVERY_TIMEOUT,
                 retry_policy=_IO_RETRY,
             )
+            total_yield = await workflow.execute_activity(
+                activities.record_scan,
+                args=[inp.artist_id, platform, _platform_id],
+                start_to_close_timeout=_ACTIVITY_TIMEOUT,
+            )
+            scanned += 1
+            if _meets_floor(platform, total_yield):
+                break  # cascade satisfied — don't burn budget on lower sources
+
+        choice = await workflow.execute_activity(
+            activities.choose_embed_source, inp.artist_id, start_to_close_timeout=_ACTIVITY_TIMEOUT
+        )
+        if choice is None:
+            return {"status": "no_signal", "scanned": scanned}
 
         embedded = await workflow.execute_activity(
             activities.embed_artist,
-            inp.artist_id,
+            args=[inp.artist_id, choice["source"], choice["ratio"]],
             task_queue=GPU_QUEUE,
             start_to_close_timeout=_EMBED_TIMEOUT,
             retry_policy=_IO_RETRY,
         )
         return {
             "status": "embedded",
-            "tier": binding["tier"],
-            "page_type": page_type,
-            "discovered": discovered,
+            "source": choice["source"],
+            "ratio": choice["ratio"],
+            "scanned": scanned,
             "embedded": embedded,
         }

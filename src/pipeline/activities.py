@@ -47,6 +47,58 @@ async def bind_source(artist_id: str, platform: str, platform_id: str) -> dict |
     return await asyncio.to_thread(_bind_sync, artist_id, platform, platform_id)
 
 
+def _cascade_plan_sync(artist_id: str) -> dict:
+    from pipeline.cascade import audio_identities
+
+    with psycopg.connect(Settings().database_url) as conn:
+        idents = audio_identities(conn, artist_id)
+    return {
+        "has_audio_identities": bool(idents),
+        "pending": [[p, pid] for p, pid, status in idents if status == "pending"],
+    }
+
+
+@activity.defn
+async def cascade_plan(artist_id: str) -> dict:
+    """The artist's audio-role identities in cascade order + which still need
+    scanning. Non-audio platforms (tidal/apple/qobuz) never appear."""
+    return await asyncio.to_thread(_cascade_plan_sync, artist_id)
+
+
+def _record_scan_sync(artist_id: str, platform: str, platform_id: str) -> int:
+    from pipeline.cascade import mark_scanned, source_yields
+
+    with psycopg.connect(Settings().database_url) as conn:
+        total = source_yields(conn, artist_id).get(platform, 0)
+        mark_scanned(conn, platform, platform_id, total)
+        conn.commit()
+    return total
+
+
+@activity.defn
+async def record_scan(artist_id: str, platform: str, platform_id: str) -> int:
+    """Write the terminal scan verdict for an identity; returns the platform's
+    TOTAL embeddable yield (not just newly-discovered) for floor decisions."""
+    return await asyncio.to_thread(_record_scan_sync, artist_id, platform, platform_id)
+
+
+def _choose_embed_source_sync(artist_id: str) -> dict | None:
+    from pipeline.cascade import choose_source, source_yields
+
+    with psycopg.connect(Settings().database_url) as conn:
+        choice = choose_source(source_yields(conn, artist_id))
+    if choice is None:
+        return None
+    return {"source": choice[0], "ratio": choice[1]}
+
+
+@activity.defn
+async def choose_embed_source(artist_id: str) -> dict | None:
+    """Pick the artist's embedding source: floor-met by priority, else best
+    floor-ratio thin source; None when nothing usable exists anywhere."""
+    return await asyncio.to_thread(_choose_embed_source_sync, artist_id)
+
+
 def _discover_deezer_sync(artist_id: str) -> int:
     from pipeline.sources.deezer import discover_deezer
 
@@ -79,19 +131,20 @@ def _embedder():
     return get_embedder(settings.embedding_model, settings.effective_device)
 
 
-def _embed_artist_sync(artist_id: str) -> int:
+def _embed_artist_sync(artist_id: str, source: str | None, ratio: float | None) -> int:
     from pipeline.embed_job import embed_artist_clips
 
     settings = Settings()
     with psycopg.connect(settings.database_url) as conn:
-        n = embed_artist_clips(conn, _embedder(), artist_id)
+        n = embed_artist_clips(conn, _embedder(), artist_id, source, ratio)
         conn.commit()
     return n
 
 
 @activity.defn
-async def embed_artist(artist_id: str) -> int:
-    """Embed the artist's pending tracks with the configured model (default MuQ,
-    PIPELINE_EMBEDDING_MODEL to swap); store stamped clip rows + refresh the
-    artist centroid. Returns the number of clips embedded."""
-    return await asyncio.to_thread(_embed_artist_sync, artist_id)
+async def embed_artist(artist_id: str, source: str | None = None, ratio: float | None = None) -> int:
+    """Embed the artist's pending tracks from ONE source (centroid purity) with
+    the configured model (default MuQ, PIPELINE_EMBEDDING_MODEL to swap); store
+    stamped clips, refresh the centroid with its signal_ratio, lock
+    artist.embedding_source. Returns the number of clips embedded."""
+    return await asyncio.to_thread(_embed_artist_sync, artist_id, source, ratio)
