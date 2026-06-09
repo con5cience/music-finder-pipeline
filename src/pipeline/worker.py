@@ -23,7 +23,7 @@ async def main() -> None:
         client,
         task_queue=settings.temporal_task_queue,
         workflows=[IngestArtistWorkflow],
-        activities=[activities.classify_page, activities.bind_source, activities.clap_embed],
+        activities=[activities.classify_page, activities.bind_source, activities.embed_artist],
     )
     print(f"worker up — queue={settings.temporal_task_queue} device={settings.effective_device}")
     await worker.run()

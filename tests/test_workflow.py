@@ -29,8 +29,8 @@ def _mock_bind(tier: str):
     return bind
 
 
-@activity.defn(name="clap_embed")
-async def mock_clap(artist_id: str) -> int:
+@activity.defn(name="embed_artist")
+async def mock_embed(artist_id: str) -> int:
     return 3
 
 
@@ -47,7 +47,7 @@ async def _run(env: WorkflowEnvironment, bind, signal: str | None = None) -> dic
         env.client,
         task_queue=tq,
         workflows=[IngestArtistWorkflow],
-        activities=[mock_classify, bind, mock_clap],
+        activities=[mock_classify, bind, mock_embed],
     ):
         handle = await env.client.start_workflow(
             IngestArtistWorkflow.run,

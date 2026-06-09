@@ -1,7 +1,7 @@
 """Per-artist ingest workflow.
 
 Durable orchestration: classify the page → bind a source under a verification
-tier → (Tier C blocks on a human-review SIGNAL) → CLAP-embed. The human-in-the-
+tier → (Tier C blocks on a human-review SIGNAL) → embed. The human-in-the-
 loop gate is the reason for Temporal: a Tier-C binding parks the workflow,
 crash-safe, for as long as it takes a reviewer to decide.
 """
@@ -58,6 +58,6 @@ class IngestArtistWorkflow:
                 return {"status": "rejected_by_review", "page_type": page_type}
 
         embedded = await workflow.execute_activity(
-            activities.clap_embed, inp.artist_id, start_to_close_timeout=_ACTIVITY_TIMEOUT
+            activities.embed_artist, inp.artist_id, start_to_close_timeout=_ACTIVITY_TIMEOUT
         )
         return {"status": "embedded", "tier": binding["tier"], "page_type": page_type, "embedded": embedded}
