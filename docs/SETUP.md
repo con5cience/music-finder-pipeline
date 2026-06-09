@@ -115,6 +115,7 @@ stable, named commands (easy to allow-list):
 | `uv run poe worker` | `python -m pipeline.worker` |
 | `uv run poe temporal` | `temporal server start-dev` |
 | `uv run poe bench` | `python -m pipeline.bench` (model-eval + clap-cost demo) |
+| `uv run poe fetch-clips` | download labeled benchmark clips from Deezer (`seeds/benchmark-artists.txt` → `clips/`) |
 
 ## Local dev (Mac)
 
@@ -182,18 +183,24 @@ uv run alembic history             # full history
 The harness compares audio embedders on **throughput** (O4) and **embedding
 quality** (O1: same-artist clips should cluster tighter than cross-artist).
 
-**Step 1 — assemble a small labeled clip set.** One folder per artist, audio
-files inside (`wav`/`flac`/`mp3`/`ogg`):
+**Step 1 — fetch a labeled clip set (no manual prep).** The fetcher resolves
+each artist *name* to a Deezer **artist entity** and downloads ~12 of that
+entity's own top-track preview MP3s — provably the named artist (kept only when
+that artist is the track's `artist.id` **and** a `role=="Main"` contributor; an
+unresolvable/ambiguous name is skipped, never guessed):
 
-```
-clips/
-  aphex-twin/   t1.flac  t2.flac  t3.mp3
-  burial/       t1.flac  t2.flac
-  ...
+```sh
+uv run poe fetch-clips                      # uses seeds/benchmark-artists.txt
+# or an ad-hoc list:
+uv run python -m pipeline.bench.fetch_clips "Aphex Twin" "Burial" -n 12 --out clips
 ```
 
-~5–10 artists *you know*, 3–5 tracks each; 30-second clips are fine. More
-artists/clips → a more reliable read.
+This writes the `clips/<artist>/<trackid>.mp3` layout Step 2 reads, plus a
+per-artist `manifest.json` (resolved id + per-clip provenance) for auditability.
+`seeds/benchmark-artists.txt` is 15 deep-catalog acts, each verified to return
+≥12 qualifying tracks — pull ≥10–12/artist for a stable intra-artist cosine.
+(Deezer previews are a fixed 30s, 128 kbps; `/top` is the artist's most-popular
+tracks so they cluster tightly — ideal for the same-vs-cross separation metric.)
 
 **Step 2 — run it** (first run downloads weights: CLAP ~600 MB, MERT ~400 MB,
 MuQ ~2 GB):

@@ -1,0 +1,22 @@
+# Benchmark seed artists — deep-catalog acts, each verified live (2026-06-09) to
+# return >=12 qualifying Deezer main-tracks (the /top cap is 50, so 12 is easy).
+# Used by: uv run poe fetch-clips  ->  clips/<slug>/<trackid>.mp3
+#
+# Names must match Deezer's spelling under normalize_name() (ascii/casefold,
+# alnum-only). If a name resolves UNRESOLVED, fix the spelling here rather than
+# letting the fetcher guess — e.g. "&" is dropped, so "X & Y" != "X and Y".
+Aphex Twin
+Burial
+Boards of Canada
+Four Tet
+Bonobo
+Bicep
+Flying Lotus
+Radiohead
+Tame Impala
+Kendrick Lamar
+Daft Punk
+Floating Points
+Jon Hopkins
+Caribou
+Mount Kimbie

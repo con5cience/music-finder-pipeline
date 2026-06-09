@@ -66,6 +66,7 @@ migrate-status = "alembic current"
 worker = "python -m pipeline.worker"
 temporal = "temporal server start-dev"
 bench = "python -m pipeline.bench"
+fetch-clips = "python -m pipeline.bench.fetch_clips --file seeds/benchmark-artists.txt --out clips"
 check.sequence = ["lint", "test"]
 setup.sequence = ["db-up", "migrate"]   # post-`uv sync` convenience (full: ./scripts/bootstrap.sh)
 
