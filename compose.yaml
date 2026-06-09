@@ -4,7 +4,7 @@
 # a Temporal service is added to this compose in the orchestration slice.
 services:
   db:
-    image: postgres:16
+    image: pgvector/pgvector:pg16  # postgres:16 + the pgvector extension (embedding tables)
     environment:
       POSTGRES_USER: pipeline
       POSTGRES_PASSWORD: pipeline
