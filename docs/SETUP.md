@@ -3,6 +3,16 @@
 How to stand up the pipeline stack — Postgres (the local "factory" DB), Temporal,
 and the worker — on the Mac for dev and on the CUDA box for real runs.
 
+**Temporal is self-hosted** — the CLI **dev server** locally (`temporal server
+start-dev`), and a single-node self-hosted server on the box — **not Temporal
+Cloud**. The worker connects to `localhost:7233`; tests use the in-process
+time-skipping server. No SaaS, no API keys.
+
+**One command** (after the system prerequisites below): `./scripts/bootstrap.sh`
+— `uv sync` → Postgres → migrate. On the box add MuQ: `WITH_MUQ=1
+./scripts/bootstrap.sh`. Everything Python is reproducible from `uv.lock`; only
+the prereqs (uv, Docker, Temporal CLI, NVIDIA driver) are system installs.
+
 ## Ports
 
 | Service | Address |
@@ -31,6 +41,8 @@ stable, named commands (easy to allow-list):
 
 | Task | Runs |
 |---|---|
+| `./scripts/bootstrap.sh` | full: `uv sync` → Postgres → migrate (`WITH_MUQ=1` on the box) |
+| `uv run poe setup` | post-sync: `db-up` then `migrate` |
 | `uv run poe test` | `pytest -q` |
 | `uv run poe lint` / `fix` / `fmt` | `ruff check .` / `--fix` / `ruff format .` |
 | `uv run poe check` | lint then test |
@@ -69,19 +81,20 @@ server isn't reachable, so `uv run pytest -q` works on a bare checkout too.
 
 ```sh
 # uv, Docker, Temporal CLI via the Linux installers above.
-# NVIDIA driver + CUDA toolkit (12.x) for the RTX 4070 Ti SUPER.
+# NVIDIA driver only — the pinned CUDA torch wheel bundles the CUDA runtime, so
+# NO separate CUDA toolkit is required.
 
 git clone <repo> && cd music-finder-pipeline
-uv sync
-docker compose up -d db
-uv run alembic upgrade head
-temporal server start-dev --ip 0.0.0.0   # or run under systemd for persistence
+WITH_MUQ=1 ./scripts/bootstrap.sh        # uv sync (+ muq) → Postgres → migrate
+temporal server start-dev --ip 0.0.0.0   # self-hosted; or run under systemd
 uv run python -m pipeline.worker         # prints device=cuda automatically
 ```
 
 GPU lights up by default — `device.select_device()` returns `cuda` when torch
-sees the card. Force with `PIPELINE_DEVICE=cpu|mps|cuda`. (torch + the CLAP/audio
-models are added in the embedding slice; the foundation runs without them.)
+sees the card. Force with `PIPELINE_DEVICE=cpu|mps|cuda`. torch is **pinned per
+platform** in `pyproject.toml`/`uv.lock`: the CUDA wheel (cu128) on Linux, the
+default CPU/MPS build on the Mac — `uv sync --group models` is deterministic on
+both. (The `muq` group is heavier; install it on the box via the bootstrap above.)
 
 ## Configuration (env, `PIPELINE_` prefix — defaults in `src/pipeline/config.py`)
 
