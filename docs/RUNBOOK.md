@@ -54,6 +54,17 @@ nothing, everything reconnects, but expect a ~60s blip.
 | `uv run poe search-bind -- --limit N` | Tier-B binding waves over unbound artists |
 | `uv run poe factory-status -- --watch` | live terminal dashboard |
 
+## Monthly MB sync (ADR-018)
+
+```bash
+uv run poe mb-sync                  # dry-run: download latest, gates, diff report
+uv run poe mb-sync -- --apply       # after THREE consecutive clean dry-runs
+```
+- Run in a network-quiet window (~10GB download; direct, not proxied).
+- Skips automatically when the latest serial is already applied.
+- Both-embedded merge conflicts land in the admin Tier-C queue.
+- Every run is ledgered in mb_refresh_run (serial, gates, diff, applied_at).
+
 ## Incident playbooks
 
 ### Platform 429s (rate limiting)
@@ -85,6 +96,19 @@ REINDEX DATABASE CONCURRENTLY pipeline;
 Deezer previews ~1-2h, Bandcamp ~24h, SoundCloud CloudFront-signed. The
 fetch path refreshes-on-403 per platform; persistent failures skip the
 track (stays pending). No action unless skip rates spike on the fleet card.
+
+### Stale-image deploys (the silent no-op build)
+`docker compose build <svc>` NO-OPS silently for services without a build:
+key — a fix can ship to the image while the container runs old code
+("Started" proves nothing). All image-sharing services now carry build:,
+and the standard is: VERIFY THE CHANGE IN-CONTAINER after deploy
+(`docker exec <c> .venv/bin/python -c 'import …; print(…)'`).
+
+### Unregistered-activity hang
+Workflows park silently at a step whose activity no worker registers (three
+occurrences). Coherence tests now assert every workflow-dispatched activity
+is registered — if you see eternal parking anyway, check task-queue
+pollers in the Temporal UI (:8233) first.
 
 ### GPU OOM / embed stalls
 `max_concurrent_activities=2` on the gpu worker is the VRAM cap (16GB card;
