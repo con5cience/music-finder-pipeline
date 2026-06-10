@@ -29,8 +29,17 @@ def _w(d: Path, name: str, rows: list[list[str]]) -> None:
     (d / name).write_text("".join("\t".join(r) + "\n" for r in rows))
 
 
+def build_fixture_dump(tmp_path: Path) -> Path:
+    """Importable builder (test_mb_refresh reuses the same fixture corpus)."""
+    return _build(tmp_path)
+
+
 @pytest.fixture
 def dump_dir(tmp_path: Path) -> Path:
+    return _build(tmp_path)
+
+
+def _build(tmp_path: Path) -> Path:
     d = tmp_path / "mbdump"
     d.mkdir()
     # artist: id gid name sort_name b_y b_m b_d e_y e_m e_d type area gender

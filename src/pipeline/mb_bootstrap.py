@@ -63,20 +63,24 @@ def _assert_layout(path: Path, table: str) -> None:
         )
 
 
-def load_mbdump(conn: Connection, dump_dir: Path | str) -> dict[str, int]:
-    """Truncate-and-reload every mb_raw table from `dump_dir`. Returns row counts."""
+def load_mbdump(
+    conn: Connection, dump_dir: Path | str, *, schema: str = "mb_raw",
+    tables: dict[str, int] | None = None,
+) -> dict[str, int]:
+    """Truncate-and-reload every `schema` table from `dump_dir` (schema param:
+    ADR-018 shadow loads into mb_raw_next). Returns row counts."""
     dump_dir = Path(dump_dir)
     counts: dict[str, int] = {}
-    for table in EXPECTED_COLS:
+    for table in (tables or EXPECTED_COLS):
         path = dump_dir / table
         if not path.exists():
             raise FileNotFoundError(f"missing mbdump table file: {path}")
         _assert_layout(path, table)
-        conn.execute(f"TRUNCATE mb_raw.{table}")
-        with conn.cursor() as cur, cur.copy(f"COPY mb_raw.{table} FROM STDIN") as copy, open(path, "rb") as f:
+        conn.execute(f"TRUNCATE {schema}.{table}")
+        with conn.cursor() as cur, cur.copy(f"COPY {schema}.{table} FROM STDIN") as copy, open(path, "rb") as f:
             while chunk := f.read(_CHUNK):
                 copy.write(chunk)
-        counts[table] = conn.execute(f"SELECT count(*) FROM mb_raw.{table}").fetchone()[0]
+        counts[table] = conn.execute(f"SELECT count(*) FROM {schema}.{table}").fetchone()[0]
     return counts
 
 
@@ -88,11 +92,13 @@ def _patterns_values_sql() -> tuple[str, list[str]]:
     return rows, params
 
 
-def derive_identities(conn: Connection) -> dict[str, int]:
+def derive_identities(conn: Connection, *, schema: str = "mb_raw") -> dict[str, int]:
     """Derive artist + platform_identity rows from active artist→url rels.
 
-    Idempotent: conflicts on artist.mbid / (platform, platform_id) are skipped.
-    Returns per-platform identity counts (cumulative, post-derive).
+    Idempotent: conflicts on artist.mbid / (platform, platform_id) are skipped
+    — which makes this the ADR-018 refresh diff-apply too (run against
+    mb_raw_next: only NEW artists/identities land). Returns per-platform
+    identity counts (cumulative, post-derive).
     """
     rows, params = _patterns_values_sql()
     matched_cte = f"""
@@ -100,10 +106,10 @@ def derive_identities(conn: Connection) -> dict[str, int]:
         matched AS (
             SELECT a.gid AS mbid, a.name, p.platform,
                    substring(u.url FROM p.id_re) AS platform_id, u.url
-            FROM mb_raw.l_artist_url lau
-            JOIN mb_raw.link l ON l.id = lau.link AND NOT l.ended
-            JOIN mb_raw.url u ON u.id = lau.entity1
-            JOIN mb_raw.artist a ON a.id = lau.entity0
+            FROM {schema}.l_artist_url lau
+            JOIN {schema}.link l ON l.id = lau.link AND NOT l.ended
+            JOIN {schema}.url u ON u.id = lau.entity1
+            JOIN {schema}.artist a ON a.id = lau.entity0
             JOIN patterns p ON u.url ~ p.host_re
             WHERE substring(u.url FROM p.id_re) IS NOT NULL
         )
