@@ -106,6 +106,7 @@ async def _heartbeat_loop(settings: Settings, role: str, queues: str) -> None:
     import psycopg
 
     host = socket.gethostname()
+    _gc_counter = 0
     while True:
         try:
             with psycopg.connect(settings.database_url) as conn:
