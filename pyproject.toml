@@ -78,6 +78,8 @@ bench = "python -m pipeline.bench"
 fetch-clips = "python -m pipeline.bench.fetch_clips --file seeds/benchmark-artists.txt --out clips"
 mb-bootstrap = "python -m pipeline.mb_bootstrap"   # usage: uv run poe mb-bootstrap --dir ~/g/db-backups/mbdump-extract/mbdump
 analysis-backfill = "python -m pipeline.backfill_analysis"   # Wave-1 heads over already-embedded tracks
+search-bind = "python -m pipeline.search_bind"   # 3d B-tier binding over unbound artists
+review-poll = "python -m pipeline.review_poller"   # apply admin-approved Tier-C bindings
 check.sequence = ["lint", "test"]
 setup.sequence = ["db-up", "migrate"]   # post-`uv sync` convenience (full: ./scripts/bootstrap.sh)
 
