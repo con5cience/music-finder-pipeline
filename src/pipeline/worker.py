@@ -70,9 +70,9 @@ def build_workers(client: Client, settings: Settings, role: str = "all") -> list
             client,
             task_queue=PREP_QUEUE,
             activities=[activities.prep_artist_clips],
-            # CPU staging: fetch+decode+CPU heads; 8 keeps the gpu lane fed
-            # without saturating decode CPU (measured in the campaign).
-            max_concurrent_activities=8,
+            # CPU staging. Measured: 20 cores at load ~5.5 with conc 8 —
+            # the cap was serial proxy fetches (now pooled), not CPU.
+            max_concurrent_activities=12,
         ))
     if role in ("all", "gpu"):
         import os

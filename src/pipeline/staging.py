@@ -79,8 +79,28 @@ def prep_artist(
     adir.mkdir(parents=True)
     cpu_head = [CpuAnalysisHead()]
     manifest: list[dict] = []
-    for tid, url, duration_s, platform, ptid, _release, _ri, _ti in selected:
-        path = _fetch_with_refresh(conn, url, platform, ptid, adir, fetch, refresher)
+
+    # PARALLEL fetch (measured: 2.15s proxy round-trip x 12 serial fetches
+    # was prep's whole bottleneck — GPU starved at 0%). Plain fetches pool;
+    # failures retry SERIALLY through the refresher (it shares the DB conn,
+    # which is not thread-safe). Order keyed by index → manifest order stays
+    # the selection order.
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _plain(args):
+        i, url = args
+        try:
+            return i, fetch(url, adir)
+        except Exception:  # noqa: BLE001 — retried via refresher below
+            return i, None
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        fetched = dict(pool.map(_plain, [(i, row[1]) for i, row in enumerate(selected)]))
+
+    for i, (tid, url, duration_s, platform, ptid, _release, _ri, _ti) in enumerate(selected):
+        path = fetched.get(i)
+        if path is None:  # pooled fetch failed → serial self-healing path
+            path = _fetch_with_refresh(conn, url, platform, ptid, adir, fetch, refresher)
         if path is None:
             continue  # stays pending; embed_staged works with what staged
         mono, sr = _decode(path)
