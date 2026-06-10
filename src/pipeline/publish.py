@@ -88,8 +88,27 @@ def artist_urls(conn: Connection, artist_id) -> dict[str, str]:
 
 
 def artist_tags(conn: Connection, artist_id) -> dict[str, int]:
-    """Calibrated artist-level tags: mean z across the artist's tracks,
-    top K with z > 0, integer weights (app convention)."""
+    """Calibrated artist-level tags. PRIMARY: artist_tag_scores (scored from
+    the artist-mean MuLan vector at embed time — full resolution, no
+    per-track-truncation pathology), z-ranked against per-tag corpus moments.
+    FALLBACK until the v2 sweep covers an artist: the per-track aggregation
+    (coverage-weighted, known-noisy on preview sources)."""
+    primary = conn.execute(
+        """
+        WITH g AS (SELECT avg(score) gmean, greatest(stddev(score), 1e-6) gsd
+                   FROM artist_tag_scores)
+        SELECT ats.tag,
+               (ats.score - coalesce(tc.mean, g.gmean)) / coalesce(tc.stddev, g.gsd) AS z
+        FROM artist_tag_scores ats
+        CROSS JOIN g
+        LEFT JOIN tag_calibration tc ON tc.tag = ats.tag AND tc.model = ats.model
+        WHERE ats.artist_id = %s
+        ORDER BY z DESC LIMIT %s
+        """,
+        (artist_id, TAG_K),
+    ).fetchall()
+    if primary:
+        return {tag: max(1, round(float(z)) + 1) for tag, z in primary if float(z) > 0}
     rows = conn.execute(
         """
         WITH g AS (SELECT avg(score) gmean, greatest(stddev(score), 1e-6) gsd
@@ -97,7 +116,8 @@ def artist_tags(conn: Connection, artist_id) -> dict[str, int]:
         z AS (
             SELECT tts.tag,
                    avg((tts.score - coalesce(tc.mean, g.gmean))
-                       / coalesce(tc.stddev, g.gsd)) AS mz
+                       / coalesce(tc.stddev, g.gsd)) AS mz,
+                   count(*) AS cnt
             FROM track_tag_scores tts
             JOIN audio_track t ON t.id = tts.track_id
             CROSS JOIN g
@@ -105,11 +125,12 @@ def artist_tags(conn: Connection, artist_id) -> dict[str, int]:
             WHERE t.artist_id = %s
             GROUP BY tts.tag
         )
-        SELECT tag, mz FROM z WHERE mz > 0 ORDER BY mz DESC LIMIT %s
+        SELECT tag, mz, mz * sqrt(cnt) AS ranked
+        FROM z WHERE mz > 0 ORDER BY ranked DESC LIMIT %s
         """,
         (artist_id, TAG_K),
     ).fetchall()
-    return {tag: max(1, round(float(z)) + 1) for tag, z in rows}
+    return {tag: max(1, round(float(z)) + 1) for tag, z, _r in rows}
 
 
 def publish_artists(factory: Connection, app: Connection, limit: int = 1000) -> int:

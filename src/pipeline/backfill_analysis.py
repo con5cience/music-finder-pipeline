@@ -54,6 +54,7 @@ def backfill_tracks(
 ) -> tuple[int, int]:
     """Run pending heads on up to `limit` embedded tracks. (done, skipped)."""
     done = skipped = 0
+    by_artist: dict[str, list] = {}
     with tempfile.TemporaryDirectory(prefix="backfill-") as tmp:
         workdir = Path(tmp)
         for tid, url, platform, ptid, owner_id in tracks_missing_heads(conn, heads, limit, artist_id):
@@ -63,11 +64,17 @@ def backfill_tracks(
                 continue
             mono, sr = _decode(path)
             segs = _clips_for_track(mono, sr, path, platform, None, workdir, f"bf-{tid}")
-            run_heads(conn, heads, HeadContext(
+            ctx = HeadContext(
                 conn=conn, track_id=tid, artist_id=owner_id, platform=platform,
                 mono=mono, sr=sr, clip_paths=[p for _s, _e, p in segs],
-            ))
+            )
+            run_heads(conn, heads, ctx)
+            by_artist.setdefault(owner_id, []).append(ctx.mulan_vecs)
             done += 1
+    from pipeline.heads import artist_tag_pass
+
+    for owner_id, vecs in by_artist.items():
+        artist_tag_pass(conn, heads, owner_id, vecs)
     return done, skipped
 
 

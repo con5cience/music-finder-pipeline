@@ -216,8 +216,11 @@ def test_backfill_analyzes_embedded_tracks_idempotently(conn, tmp_path):
     )
 
     class FakeScorer:
-        def score_clips(self, artist_id, paths):
-            assert paths
+        def embed_clips(self, artist_id, clip_paths):
+            import numpy as np
+            return np.ones((len(clip_paths), 4), dtype=np.float32)
+
+        def score_vectors(self, vecs, top_k=20):
             return [("zz-bf-genre", 0.5)]
 
     from pipeline.heads import CpuAnalysisHead, TagHead
@@ -280,16 +283,16 @@ def test_perceptual_head_axes_and_instruments(conn, tmp_path):
                 out.append(v.tolist())
             return out
 
-        def embed(self, clips):
-            v = np.zeros(8)
-            v[0] = 1.0  # aligns with the FIRST anchor (danceability positive)
-            return [v.tolist() for _ in clips]
-
     class FakeScorer:
         _embedder = FakeMulan()
 
         def _ensure(self):
             pass
+
+        def embed_clips(self, artist_id, clip_paths):
+            v = np.zeros((len(clip_paths), 8), dtype=np.float32)
+            v[:, 0] = 1.0  # aligns with the FIRST anchor (danceability positive)
+            return v
 
     a = conn.execute(
         "INSERT INTO artist (display_name, mbid) VALUES ('Perceptual Fixture', "

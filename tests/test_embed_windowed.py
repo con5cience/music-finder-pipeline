@@ -108,8 +108,12 @@ def test_analysis_and_tag_heads_run_in_embed_pass(conn, tmp_path):
     # decode-once integration: embedding an artist also writes track_analysis
     # (CPU heads) and track_tag_scores (via the injected scorer).
     class FakeScorer:
-        def score_clips(self, artist_id, clip_paths):
-            assert clip_paths  # window files exist on disk at scoring time
+        def embed_clips(self, artist_id, clip_paths):
+            assert clip_paths  # window files exist at scoring time
+            import numpy as np
+            return np.ones((len(clip_paths), 4), dtype=np.float32)
+
+        def score_vectors(self, vecs, top_k=20):
             return [("zz-fake-genre", 0.42)]
 
     a = _artist(conn)

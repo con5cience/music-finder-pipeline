@@ -304,6 +304,7 @@ def embed_artist_clips(
     with tempfile.TemporaryDirectory(prefix="embed-") as tmp:
         workdir = Path(tmp)
         usable: list[tuple] = []  # (track_id, seg_start, seg_end, clip_path)
+        _artist_vecs: list = []   # per-track MuLan window vectors (artist tag pass)
         for tid, url, duration_s, platform, ptid, _release, _ri, _ti in selected:
             path = _fetch_with_refresh(conn, url, platform, ptid, workdir, fetch, refresher)
             if path is None:
@@ -318,15 +319,21 @@ def embed_artist_clips(
             if heads:
                 from pipeline.heads import HeadContext, run_heads
 
-                run_heads(conn, heads, HeadContext(
+                _hctx = HeadContext(
                     conn=conn, track_id=tid, artist_id=artist_id, platform=platform,
                     mono=mono, sr=native_sr, clip_paths=[p for _s, _e, p in segs],
-                ))
+                )
+                run_heads(conn, heads, _hctx)
+                _artist_vecs.append(_hctx.mulan_vecs)
         if not usable:
             raise AudioFetchError(
                 f"all {len(selected)} selected tracks failed to fetch for artist {artist_id} "
                 f"(source={source}) — tracks remain pending"
             )
+        if heads:
+            from pipeline.heads import artist_tag_pass
+
+            artist_tag_pass(conn, heads, artist_id, _artist_vecs)
         clips = [Clip(id=f"{tid}:{s}", artist_id=artist_id, path=path) for tid, s, _e, path in usable]
         vectors = embedder.embed(clips)
 

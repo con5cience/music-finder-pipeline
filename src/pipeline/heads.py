@@ -68,6 +68,17 @@ class HeadContext:
     mono: np.ndarray
     sr: int
     clip_paths: list[str] = field(default_factory=list)
+    # MuLan window vectors, computed ONCE per track and shared by every
+    # MuLan-consuming head (tags + perceptual EACH ran their own identical
+    # pass before — a straight 2x GPU waste, found in the throughput audit).
+    mulan_vecs: np.ndarray | None = None
+
+
+def ensure_mulan_vecs(ctx: HeadContext, scorer) -> np.ndarray | None:
+    if ctx.mulan_vecs is not None or scorer is None or not ctx.clip_paths:
+        return ctx.mulan_vecs
+    ctx.mulan_vecs = scorer.embed_clips(ctx.artist_id, ctx.clip_paths)
+    return ctx.mulan_vecs
 
 
 class CpuAnalysisHead:
@@ -83,29 +94,29 @@ class CpuAnalysisHead:
 
 
 class TagHead:
-    """Wave 1: zero-shot genres vs the MB canonical vocabulary."""
+    """Wave 1 (v2): zero-shot genres vs the MB vocabulary — from the SHARED
+    MuLan window vectors (no second embed pass)."""
 
     name = "tags"
-    version = 1
+    version = 2  # v2: shared vectors; artist-level scoring added alongside
 
     def __init__(self, scorer):
         self._scorer = scorer
 
     def run(self, ctx: HeadContext) -> None:
-        if self._scorer is None or not ctx.clip_paths:
+        vecs = ensure_mulan_vecs(ctx, self._scorer)
+        if vecs is None:
             return
         from pipeline.tags import replace_track_tags
 
-        replace_track_tags(
-            ctx.conn, ctx.track_id, self._scorer.score_clips(ctx.artist_id, ctx.clip_paths)
-        )
+        replace_track_tags(ctx.conn, ctx.track_id, self._scorer.score_vectors(vecs))
 
 
 class PerceptualHead:
     """Wave 2: anchor-pair axes + multi-label instruments (MuLan zero-shot)."""
 
     name = "perceptual"
-    version = 1
+    version = 2  # v2: shared vectors
 
     def __init__(self, scorer):
         self._scorer = scorer  # shares the TagHead's MulanTagScorer embedder
@@ -118,16 +129,11 @@ class PerceptualHead:
         return self._anchors
 
     def run(self, ctx: HeadContext) -> None:
-        if self._scorer is None or not ctx.clip_paths:
+        vecs = ensure_mulan_vecs(ctx, self._scorer)
+        if vecs is None:
             return
         import json
 
-        from pipeline.bench.types import Clip
-
-        self._scorer._ensure()
-        emb = self._scorer._embedder
-        clips = [Clip(id=f"p:{i}", artist_id=ctx.artist_id, path=p) for i, p in enumerate(ctx.clip_paths)]
-        vecs = np.asarray(emb.embed(clips), dtype=np.float32)
         mean = vecs.mean(axis=0)
         mean /= np.linalg.norm(mean) + 1e-9
         anchors = self._anchor_matrix()
@@ -172,6 +178,20 @@ def pending_heads(conn: Connection, track_id, heads: list) -> list:
         ).fetchall()
     )
     return [h for h in heads if ran.get(h.name, 0) < h.version]
+
+
+def artist_tag_pass(conn: Connection, heads: list, artist_id: str, vecs_list: list) -> None:
+    """After per-track heads: artist tags from the ARTIST-MEAN MuLan vector
+    over every window of every selected track (full resolution — the fix for
+    per-track-truncation pathology)."""
+    scorer = next((h._scorer for h in heads if isinstance(h, TagHead) and h._scorer), None)
+    vecs = [v for v in vecs_list if v is not None]
+    if scorer is None or not vecs:
+        return
+    from pipeline.tags import ARTIST_TAG_TOP_K, replace_artist_tags
+
+    stacked = np.concatenate(vecs, axis=0)
+    replace_artist_tags(conn, artist_id, scorer.score_vectors(stacked, ARTIST_TAG_TOP_K))
 
 
 def run_heads(conn: Connection, heads: list, ctx: HeadContext) -> int:

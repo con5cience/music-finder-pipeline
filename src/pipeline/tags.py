@@ -56,15 +56,25 @@ class MulanTagScorer:
         self._embedder._ensure()
         self._vocab_matrix = np.asarray(self._embedder.embed_text(self.vocabulary), dtype=np.float32)
 
-    def score_clips(self, artist_id: str, clip_paths: list[str]) -> list[tuple[str, float]]:
-        """Top-K (tag, score) for the mean audio vector of these window files."""
+    def embed_clips(self, artist_id: str, clip_paths: list[str]) -> np.ndarray:
+        """MuLan window vectors for clip files — THE seam every consumer
+        (heads, tests) goes through; one pass serves tags + perceptual."""
         self._ensure()
         clips = [Clip(id=f"tag:{i}", artist_id=artist_id, path=p) for i, p in enumerate(clip_paths)]
-        vecs = np.asarray(self._embedder.embed(clips), dtype=np.float32)
-        mean = vecs.mean(axis=0)
+        return np.asarray(self._embedder.embed(clips), dtype=np.float32)
+
+    def score_clips(self, artist_id: str, clip_paths: list[str]) -> list[tuple[str, float]]:
+        """Top-K (tag, score) for the mean audio vector of these window files."""
+        return self.score_vectors(self.embed_clips(artist_id, clip_paths))
+
+    def score_vectors(self, vecs, top_k: int = TAG_TOP_K) -> list[tuple[str, float]]:
+        """Top-K (tag, score) for the mean of ALREADY-EMBEDDED window vectors
+        (shared-vector path: one MuLan pass serves every consumer)."""
+        self._ensure()
+        mean = np.asarray(vecs, dtype=np.float32).mean(axis=0)
         mean /= np.linalg.norm(mean) + 1e-9
         scores = self._vocab_matrix @ mean
-        top = np.argsort(scores)[::-1][:TAG_TOP_K]
+        top = np.argsort(scores)[::-1][:top_k]
         return [(self.vocabulary[i], float(scores[i])) for i in top]
 
 
@@ -82,4 +92,24 @@ def replace_track_tags(conn: Connection, track_id, tag_scores: list[tuple[str, f
         cur.executemany(
             "INSERT INTO track_tag_scores (track_id, tag, score, model) VALUES (%s, %s, %s, %s)",
             [(track_id, tag, score, TAG_MODEL) for tag, score in tag_scores],
+        )
+
+
+ARTIST_TAG_TOP_K = 40
+
+
+def replace_artist_tags(conn: Connection, artist_id, tag_scores: list[tuple[str, float]]) -> None:
+    """Artist-level tag set, scored from the ARTIST-MEAN MuLan vector — the
+    full-resolution fix for the per-track-truncation pathology (an artist's
+    track top-20s can be nearly disjoint; consistent signals died in the
+    cut). Wholesale replace, same law as track tags."""
+    conn.execute(
+        "DELETE FROM artist_tag_scores WHERE artist_id = %s AND model = %s", (artist_id, TAG_MODEL)
+    )
+    if not tag_scores:
+        return
+    with conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES (%s, %s, %s, %s)",
+            [(artist_id, tag, score, TAG_MODEL) for tag, score in tag_scores],
         )

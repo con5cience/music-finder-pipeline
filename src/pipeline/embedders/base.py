@@ -56,7 +56,14 @@ class AudioEmbedder(abc.ABC):
         self._ensure()
         wavs = [load_audio_mono(c.path, self.sample_rate) for c in clips if c.path]
         out: list[torch.Tensor] = []
-        with torch.no_grad():
+        # fp16 autocast on cuda: activations halve (throughput audit: VRAM was
+        # the cap on embed concurrency — 13.1GB peak at 3). Weights stay fp32;
+        # outputs are normalized in fp32 below, so stored vectors are
+        # numerically stable. Opt out via PIPELINE_FP16=0.
+        import os
+
+        use_amp = self.device.startswith("cuda") and os.environ.get("PIPELINE_FP16", "1") != "0"
+        with torch.no_grad(), torch.autocast("cuda", dtype=torch.float16, enabled=use_amp):
             for i in range(0, len(wavs), self.batch_size):
                 feats = self._features(wavs[i : i + self.batch_size])
                 feats = torch.nn.functional.normalize(feats.float(), dim=-1)
