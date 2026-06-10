@@ -79,6 +79,7 @@ bench = "python -m pipeline.bench"
 fetch-clips = "python -m pipeline.bench.fetch_clips --file seeds/benchmark-artists.txt --out clips"
 mb-bootstrap = "python -m pipeline.mb_bootstrap"   # usage: uv run poe mb-bootstrap --dir ~/g/db-backups/mbdump-extract/mbdump
 mb-refresh = "python -m pipeline.mb_refresh"   # ADR-018 monthly refresh (dry-run default)
+mb-sync = "python -m pipeline.mb_sync"   # download latest fullexport + refresh (dry-run default; quiet window!)
 analysis-backfill = "python -m pipeline.backfill_analysis"   # Wave-1 heads over already-embedded tracks
 search-bind = "python -m pipeline.search_bind"   # 3d B-tier binding over unbound artists
 search-rescore = "python -c \"import psycopg; from pipeline.config import Settings; from pipeline.search_bind import rescore_none_verdicts; c = psycopg.connect(Settings().database_url); print(rescore_none_verdicts(c)); c.commit()\""   # v2 re-pass over none verdicts (cache-backed, free)
