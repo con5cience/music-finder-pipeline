@@ -1,6 +1,6 @@
 """Seed IngestArtistWorkflow runs from bootstrapped Tier-A identities.
 
-Deterministic workflow ids ("ingest-{platform}-{platform_id}") make seeding
+Deterministic workflow ids ("ingest-artist-{artist_id}") make seeding
 idempotent: re-running skips identities whose workflow already exists (Temporal
 rejects duplicate ids). Use --limit for calibration-scale runs (ADR-017 gates
 mass ingest behind the 1k calibration).

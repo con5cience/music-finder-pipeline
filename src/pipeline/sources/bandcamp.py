@@ -24,6 +24,7 @@ from pathlib import Path
 from psycopg import Connection
 
 from pipeline.fetch_cache import cached_fetch
+from pipeline.sources.common import identity_row, insert_audio_track, store_refreshed_url
 
 _RELEASE_WALK_LIMIT = 5
 _HREF_RE = re.compile(r'href="(/(?:album|track)/[^"#?]+)"')
@@ -78,16 +79,6 @@ def parse_tralbum(body: bytes) -> dict | None:
     return {"artist": page_artist, "release_date": d.get("album_release_date"), "tracks": tracks}
 
 
-def _identity_row(conn: Connection, artist_id: str, subdomain: str) -> str:
-    row = conn.execute(
-        "SELECT id FROM platform_identity WHERE platform = 'bandcamp' AND platform_id = %s AND artist_id = %s",
-        (subdomain, artist_id),
-    ).fetchone()
-    if row is None:
-        raise LookupError(f"no bandcamp identity {subdomain} for artist {artist_id}")
-    return row[0]
-
-
 def discover_bandcamp(
     conn: Connection,
     artist_id: str,
@@ -97,7 +88,7 @@ def discover_bandcamp(
     cache_dir: Path | str | None = None,
 ) -> int:
     """Walk newest releases, store ALL streamable tracks; returns NEW rows."""
-    identity_id = _identity_row(conn, artist_id, subdomain)
+    identity_id = identity_row(conn, "bandcamp", artist_id, subdomain)
     base = f"https://{subdomain}.bandcamp.com"
 
     def get(path: str) -> bytes:
@@ -126,17 +117,9 @@ def discover_bandcamp(
             }
             if t.track_artist:
                 evidence["track_artist_override"] = t.track_artist  # calibration audit, not a drop
-            row = conn.execute(
-                """
-                INSERT INTO audio_track (artist_id, platform, platform_track_id, audio_url, duration_s,
-                                         from_identity_id, binding_tier, binding_evidence, verification_status)
-                VALUES (%s, 'bandcamp', %s, %s, %s, %s, 'A', %s, 'verified')
-                ON CONFLICT (platform, platform_track_id) DO NOTHING
-                RETURNING id
-                """,
-                (artist_id, t.track_id, t.stream_url, t.duration_s, identity_id, json.dumps(evidence)),
-            ).fetchone()
-            if row is not None:
+            if insert_audio_track(
+                conn, artist_id, "bandcamp", t.track_id, t.stream_url, t.duration_s, identity_id, evidence
+            ):
                 written += 1
     return written
 
@@ -168,8 +151,5 @@ def refresh_bandcamp(
         return None
     fresh = next((t.stream_url for t in parsed["tracks"] if t.track_id == platform_track_id), None)
     if fresh:
-        conn.execute(
-            "UPDATE audio_track SET audio_url = %s WHERE platform = 'bandcamp' AND platform_track_id = %s",
-            (fresh, platform_track_id),
-        )
+        store_refreshed_url(conn, "bandcamp", platform_track_id, fresh)
     return fresh

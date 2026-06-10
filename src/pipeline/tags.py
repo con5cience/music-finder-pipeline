@@ -16,8 +16,6 @@ text — ADR-016 chose audio-only for similarity with eyes open).
 
 from __future__ import annotations
 
-import functools
-
 import numpy as np
 from psycopg import Connection
 
@@ -68,11 +66,6 @@ class MulanTagScorer:
         scores = self._vocab_matrix @ mean
         top = np.argsort(scores)[::-1][:TAG_TOP_K]
         return [(self.vocabulary[i], float(scores[i])) for i in top]
-
-
-@functools.cache
-def default_scorer_vocab_key() -> None:  # placeholder for future multi-vocab versions
-    return None
 
 
 def replace_track_tags(conn: Connection, track_id, tag_scores: list[tuple[str, float]]) -> None:

@@ -1,9 +1,10 @@
 """Activities for the ingest pipeline.
 
-`embed_artist` is real (registry-driven embed + stamped storage, ADR-016);
-classify_page / bind_source remain stubs until the acquisition slice. The
-embedder is a process-level lazy singleton so model weights load once per
-worker, not once per activity run.
+Cascade activities (plan/scan/choose) are thin DB reads; embed_artist is the
+GPU pass (embed + analysis heads + tags). Models are process-level lazy
+singletons so weights load once per worker, not once per activity run.
+(classify_page/bind_source were removed with the per-identity workflow —
+B-tier binding returns in slice 3d with evidence scoring, per ADR-017.)
 """
 
 from __future__ import annotations
@@ -16,36 +17,6 @@ import psycopg
 from temporalio import activity
 
 from pipeline.config import Settings
-
-
-def _classify_sync(platform: str, platform_id: str) -> str:
-    from pipeline.bind import classify_identity
-
-    with psycopg.connect(Settings().database_url) as conn:
-        return classify_identity(conn, platform, platform_id)
-
-
-@activity.defn
-async def classify_page(platform: str, platform_id: str) -> str:
-    """Page type from identity records (MB-derived pages are pre-classified).
-
-    'unknown' means we have no authoritative record — live classification is
-    the B-tier slice's job."""
-    return await asyncio.to_thread(_classify_sync, platform, platform_id)
-
-
-def _bind_sync(artist_id: str, platform: str, platform_id: str) -> dict | None:
-    from pipeline.bind import tier_a_binding
-
-    with psycopg.connect(Settings().database_url) as conn:
-        return tier_a_binding(conn, artist_id, platform, platform_id)
-
-
-@activity.defn
-async def bind_source(artist_id: str, platform: str, platform_id: str) -> dict | None:
-    """Tier-A binding from MB url-rel provenance, or None when no authoritative
-    link exists (search-based B-tier binding is a later slice)."""
-    return await asyncio.to_thread(_bind_sync, artist_id, platform, platform_id)
 
 
 def _cascade_plan_sync(artist_id: str) -> dict:

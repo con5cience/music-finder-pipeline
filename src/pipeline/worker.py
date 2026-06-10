@@ -18,13 +18,14 @@ from temporalio.worker import Worker
 
 from pipeline import activities
 from pipeline.config import Settings
-from pipeline.queues import GPU_QUEUE, PLATFORM_QUEUES
+from pipeline.queues import DISCOVERY_ACTIVITIES, GPU_QUEUE, PLATFORM_QUEUES
 from pipeline.workflows import IngestArtistWorkflow
 
-# platform → IO activities (filled by the per-platform discovery slices).
+# DERIVED from the PLATFORMS descriptor — never hand-edit (review finding:
+# parallel registries drift; test_queues asserts this wiring stays coherent).
 PLATFORM_ACTIVITIES: dict[str, list] = {platform: [] for platform in PLATFORM_QUEUES}
-PLATFORM_ACTIVITIES["deezer"] = [activities.discover_deezer_tracks]
-PLATFORM_ACTIVITIES["bandcamp"] = [activities.discover_bandcamp_tracks]
+for _platform, _activity_name in DISCOVERY_ACTIVITIES.items():
+    PLATFORM_ACTIVITIES[_platform].append(getattr(activities, _activity_name))
 
 
 def build_workers(client: Client, settings: Settings) -> list[Worker]:
@@ -38,8 +39,6 @@ def build_workers(client: Client, settings: Settings) -> list[Worker]:
             # workflows remain in flight (verified before removal), and an
             # uncapped queue must never run GPU activities (review finding).
             activities=[
-                activities.classify_page,
-                activities.bind_source,
                 activities.cascade_plan,
                 activities.record_scan,
                 activities.choose_embed_source,

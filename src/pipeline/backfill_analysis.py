@@ -18,14 +18,12 @@ from psycopg import Connection
 
 from pipeline.analysis import ANALYSIS_VERSION, analyze_track, upsert_track_analysis
 from pipeline.embed_job import (
-    WINDOWED_PLATFORMS,
-    WINDOWS_PER_TRACK,
-    AudioFetchError,
+    _clips_for_track,
     _decode,
     _default_refresher,
+    _fetch_with_refresh,
     fetch_audio,
 )
-from pipeline.windows import peak_windows
 
 
 def unanalyzed_embedded_tracks(conn: Connection, limit: int, artist_id: str | None = None) -> list[tuple]:
@@ -62,34 +60,21 @@ def backfill_tracks(
     with tempfile.TemporaryDirectory(prefix="backfill-") as tmp:
         workdir = Path(tmp)
         for tid, url, platform, ptid, owner_id in unanalyzed_embedded_tracks(conn, limit, artist_id):
-            try:
-                path = fetch(url, workdir)
-            except AudioFetchError:
-                fresh = refresher(conn, platform, ptid) if refresher else None
-                if not fresh:
-                    skipped += 1
-                    continue
-                try:
-                    path = fetch(fresh, workdir)
-                except AudioFetchError:
-                    skipped += 1
-                    continue
+            path = _fetch_with_refresh(conn, url, platform, ptid, workdir, fetch, refresher)
+            if path is None:
+                skipped += 1
+                continue
             mono, sr = _decode(path)
             upsert_track_analysis(conn, tid, analyze_track(mono, sr))
             if tag_scorer is not None:
                 from pipeline.tags import replace_track_tags
 
-                if platform in WINDOWED_PLATFORMS:
-                    import soundfile as sf
-
-                    paths = []
-                    for s, e in peak_windows(mono, sr, k=WINDOWS_PER_TRACK):
-                        p = workdir / f"bf-{tid}-{s}.wav"
-                        sf.write(p, mono[s * sr:e * sr], sr)
-                        paths.append(str(p))
-                else:
-                    paths = [path]
-                replace_track_tags(conn, tid, tag_scorer.score_clips(owner_id, paths))
+                # SAME windows the embedder cuts (shared _clips_for_track —
+                # review finding: the inline copy was drifting, which would
+                # have made backfilled tag scores incomparable to embed-time
+                # scores right when the backfill exists to calibrate them)
+                segs = _clips_for_track(mono, sr, path, platform, None, workdir, f"bf-{tid}")
+                replace_track_tags(conn, tid, tag_scorer.score_clips(owner_id, [p for _s, _e, p in segs]))
             done += 1
     return done, skipped
 

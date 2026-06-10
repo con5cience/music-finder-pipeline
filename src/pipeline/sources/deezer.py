@@ -19,6 +19,7 @@ from pathlib import Path
 from psycopg import Connection
 
 from pipeline.fetch_cache import cached_fetch
+from pipeline.sources.common import identity_row, insert_audio_track, store_refreshed_url
 
 _API = "https://api.deezer.com"
 _TOP_LIMIT = 12  # ADR-017 sampling policy: 10-12 previews per artist
@@ -47,16 +48,6 @@ def parse_tracks(body: bytes, artist_platform_id: str) -> list[Track]:
     return out
 
 
-def _identity_row(conn: Connection, artist_id: str, platform_id: str) -> str:
-    row = conn.execute(
-        "SELECT id FROM platform_identity WHERE platform = 'deezer' AND platform_id = %s AND artist_id = %s",
-        (platform_id, artist_id),
-    ).fetchone()
-    if row is None:
-        raise LookupError(f"no deezer identity {platform_id} for artist {artist_id}")
-    return row[0]
-
-
 def refresh_preview(
     conn: Connection,
     platform_track_id: str,
@@ -75,10 +66,7 @@ def refresh_preview(
     ).body
     preview = json.loads(body).get("preview") or None
     if preview:
-        conn.execute(
-            "UPDATE audio_track SET audio_url = %s WHERE platform = 'deezer' AND platform_track_id = %s",
-            (preview, platform_track_id),
-        )
+        store_refreshed_url(conn, "deezer", platform_track_id, preview)
     return preview
 
 
@@ -91,7 +79,7 @@ def discover_deezer(
     cache_dir: Path | str | None = None,
 ) -> int:
     """Discover preview tracks for a Tier-A-bound artist; returns NEW rows written."""
-    identity_id = _identity_row(conn, artist_id, platform_id)
+    identity_id = identity_row(conn, "deezer", artist_id, platform_id)
 
     def get(path: str) -> bytes:
         return cached_fetch(conn, "deezer", f"{_API}/{path}", fetcher=fetcher, cache_dir=cache_dir).body
@@ -109,19 +97,9 @@ def discover_deezer(
 
     written = 0
     for t in tracks:
-        evidence = json.dumps(
-            {"source": source, "track_duration_s": t.track_duration_s, "title": t.title}
-        )
-        row = conn.execute(
-            """
-            INSERT INTO audio_track (artist_id, platform, platform_track_id, audio_url, duration_s,
-                                     from_identity_id, binding_tier, binding_evidence, verification_status)
-            VALUES (%s, 'deezer', %s, %s, %s, %s, 'A', %s, 'verified')
-            ON CONFLICT (platform, platform_track_id) DO NOTHING
-            RETURNING id
-            """,
-            (artist_id, t.track_id, t.preview_url, _PREVIEW_S, identity_id, evidence),
-        ).fetchone()
-        if row is not None:
+        evidence = {"source": source, "track_duration_s": t.track_duration_s, "title": t.title}
+        if insert_audio_track(
+            conn, artist_id, "deezer", t.track_id, t.preview_url, _PREVIEW_S, identity_id, evidence
+        ):
             written += 1
     return written

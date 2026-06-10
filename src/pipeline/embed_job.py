@@ -5,9 +5,9 @@ Temporal or model weights. The caller owns the transaction. Every stored row is
 stamped with the embedder's registry `name` — the version stamp that makes a
 future model swap an additive re-embed.
 
-Segmenting: one segment per track for now (today's sources are 30s previews).
-Multi-segment sampling (25/50/75%, ADR-011 style) lands with full-audio
-acquisition; the schema already supports it via segment_start_s.
+Segmenting: preview sources embed whole files; full-track (windowed)
+sources cut RMS-peak 30s windows — see windows.py and the PLATFORMS
+descriptor in queues.py.
 """
 
 from __future__ import annotations
@@ -21,12 +21,10 @@ import soundfile as sf
 from psycopg import Connection
 
 from pipeline.bench.types import Clip, Embedder
+from pipeline.queues import REFRESHERS, WINDOWED_PLATFORMS
 from pipeline.windows import peak_windows
 
 _DEFAULT_SEGMENT_S = 30
-# Full-track sources get RMS-peak windowing (ADR-017 §2 synthetic previews);
-# preview sources embed their file whole.
-WINDOWED_PLATFORMS = {"bandcamp", "soundcloud", "youtube"}
 WINDOWS_PER_TRACK = 4   # 3 tracks x 4 windows ≈ the 10-12 Deezer-preview budget
 TRACKS_PER_SOURCE = 3   # full-track sources: floor=3 tracks, newest across releases
 MIN_TRACK_S = 60        # skits/intros pollute windows; allowed only when nothing else
@@ -156,16 +154,31 @@ def refresh_artist_centroid(
 
 
 def _default_refresher(conn: Connection, platform: str, platform_track_id: str) -> str | None:
-    """Re-resolve an expired audio URL for platforms that support it."""
-    if platform == "deezer":
-        from pipeline.sources.deezer import refresh_preview
+    """Re-resolve an expired audio URL — dispatch DERIVED from the PLATFORMS
+    descriptor (review finding: per-platform if-chains drift as sources land)."""
+    import importlib
 
-        return refresh_preview(conn, platform_track_id)
-    if platform == "bandcamp":
-        from pipeline.sources.bandcamp import refresh_bandcamp
+    dotted = REFRESHERS.get(platform)
+    if dotted is None:
+        return None
+    module, _, fn_name = dotted.partition(":")
+    return getattr(importlib.import_module(module), fn_name)(conn, platform_track_id)
 
-        return refresh_bandcamp(conn, platform_track_id)
-    return None
+
+def _fetch_with_refresh(conn, url, platform, ptid, workdir, fetch, refresher) -> str | None:
+    """One fetch + one refresh-retry; None = skip (track stays pending). THE
+    shared self-healing policy — embed and backfill both call this (review
+    finding: the duplicated loops had already drifted cosmetically)."""
+    try:
+        return fetch(url, workdir)
+    except AudioFetchError:
+        fresh = refresher(conn, platform, ptid) if refresher else None
+        if not fresh:
+            return None
+        try:
+            return fetch(fresh, workdir)
+        except AudioFetchError:
+            return None
 
 
 def _select_for_source(pending: list[tuple], source: str | None, budget: int = TRACKS_PER_SOURCE) -> list[tuple]:
@@ -284,16 +297,9 @@ def embed_artist_clips(
         usable: list[tuple] = []  # (track_id, seg_start, seg_end, clip_path)
         track_clip_paths: dict = {}  # track_id -> its window files (for the tag head)
         for tid, url, duration_s, platform, ptid, _release, _ri, _ti in selected:
-            try:
-                path = fetch(url, workdir)
-            except AudioFetchError:
-                fresh = refresher(conn, platform, ptid) if refresher else None
-                if not fresh:
-                    continue  # no refresh path — skip, stays pending
-                try:
-                    path = fetch(fresh, workdir)
-                except AudioFetchError:
-                    continue  # refreshed URL still broken — skip
+            path = _fetch_with_refresh(conn, url, platform, ptid, workdir, fetch, refresher)
+            if path is None:
+                continue  # unfetchable after refresh — skip, stays pending
             # decode ONCE when any head needs the waveform (analysis, windowing);
             # preview tracks with analysis off embed their file untouched
             needs_decode = run_analysis or platform in WINDOWED_PLATFORMS
