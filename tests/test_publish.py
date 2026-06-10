@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 
-from pipeline.publish import artist_tags, artist_urls, publish_artists, slugify
+from pipeline.publish import artist_tags, artist_urls, publish_artists, resolve_slug, slug_base
 
 MBID = "00000000-feed-4bad-9bad-000000000aab"
 
@@ -57,10 +57,21 @@ def _factory_artist(conn) -> str:
     return a
 
 
-def test_slugify_safe_and_collision_proofed():
-    s = slugify("Püblish Fixture!", MBID)
-    assert s == "publish-fixture-00000000"
-    assert slugify("", MBID).startswith("artist-")
+def test_slug_base_safe():
+    assert slug_base("Püblish Fixture!") == "publish-fixture"
+    assert slug_base("") == "artist"
+
+
+def test_resolve_slug_clean_first_suffix_on_collision(conn):
+    _serving_schema(conn)
+    # first holder gets the clean slug
+    assert resolve_slug(conn, "Porches", "00000000-feed-4bad-9bad-0000000000b1") == "porches"
+    conn.execute("INSERT INTO artists (id, mbid, name, slug) VALUES "
+                 "(gen_random_uuid(), '00000000-feed-4bad-9bad-0000000000b1', 'Porches', 'porches')")
+    # different artist, same name → -2 (the app's 031 convention)
+    assert resolve_slug(conn, "Porches", "00000000-feed-4bad-9bad-0000000000b2") == "porches-2"
+    # the original keeps its slug on re-publish (idempotent)
+    assert resolve_slug(conn, "Porches", "00000000-feed-4bad-9bad-0000000000b1") == "porches"
 
 
 def test_urls_derived_from_identities(conn):
@@ -77,7 +88,7 @@ def test_publish_upserts_and_is_idempotent(conn):
     row = conn.execute("SELECT name, slug, tags, audio_embedding, bandcamp_url "
                        "FROM artists WHERE mbid = %s", (MBID,)).fetchone()
     assert row[0] == "Püblish Fixture"
-    assert row[1] == "publish-fixture-00000000"
+    assert row[1] == "publish-fixture"
     tags = row[2] if isinstance(row[2], dict) else json.loads(row[2])
     assert "zz-pub-genre" in tags and all(isinstance(v, int) and v >= 1 for v in tags.values())
     assert row[3] == "[0.6,0.8]"

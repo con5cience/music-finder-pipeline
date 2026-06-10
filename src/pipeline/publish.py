@@ -32,11 +32,34 @@ _URL_BUILDERS = {
 _URL_COLUMNS = {p: f"{p}_url" for p in _URL_BUILDERS}
 
 
-def slugify(name: str, mbid: str) -> str:
-    """URL-safe, collision-proofed by an mbid suffix (homonyms are common)."""
+def slug_base(name: str) -> str:
     folded = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
-    base = re.sub(r"[^a-z0-9]+", "-", folded.casefold()).strip("-") or "artist"
-    return f"{base}-{mbid[:8]}"
+    return re.sub(r"[^a-z0-9]+", "-", folded.casefold()).strip("-") or "artist"
+
+
+def resolve_slug(app: Connection, name: str, mbid: str) -> str:
+    """The app's own slug convention (its migration 031 indexes exactly this):
+    clean base for the first holder, base-2/-3/... on homonym collisions.
+    Idempotent: a row that already holds a slug in the family keeps it."""
+    base = slug_base(name)
+    mine = app.execute(
+        "SELECT slug FROM artists WHERE mbid = %s AND (slug = %s OR slug ~ ('^' || %s || '-[0-9]+$'))",
+        (mbid, base, base),
+    ).fetchone()
+    if mine:
+        return mine[0]  # stable across re-publishes
+    taken = {
+        r[0] for r in app.execute(
+            "SELECT slug FROM artists WHERE (slug = %s OR slug ~ ('^' || %s || '-[0-9]+$')) AND mbid != %s",
+            (base, base, mbid),
+        ).fetchall()
+    }
+    if base not in taken:
+        return base
+    n = 2
+    while f"{base}-{n}" in taken:
+        n += 1
+    return f"{base}-{n}"
 
 
 def publishable_artists(conn: Connection, limit: int) -> list[tuple]:
@@ -111,7 +134,7 @@ def publish_artists(factory: Connection, app: Connection, limit: int = 1000) -> 
                 audio_embedding_updated = now()
                 {url_cols}
             """,
-            (mbid, name, slugify(name, mbid), json.dumps(tags), embedding,
+            (mbid, name, resolve_slug(app, name, mbid), json.dumps(tags), embedding,
              *urls.values(), *urls.values()),
         )
         published += 1
