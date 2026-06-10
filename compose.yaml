@@ -2,6 +2,12 @@
 # music-finder app's Postgres (5433/5434). Temporal dev runs via the SDK's
 # in-process test env for tests and `temporal server start-dev` for manual runs;
 # a Temporal service is added to this compose in the orchestration slice.
+#
+# The `music-factory` network is OWNED here (created on `up`) and joined by
+# the sibling app's compose as external — the app container reaches this DB
+# as pipeline-db:5432 for the admin Tier-C queue + pipeline facts. Host
+# publishing stays loopback-only (5440); the shared network adds no off-host
+# exposure. Bring the factory up before the app.
 services:
   db:
     image: pgvector/pgvector:pg16  # postgres:16 + the pgvector extension (embedding tables)
@@ -13,6 +19,15 @@ services:
       - "127.0.0.1:5440:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      default: {}
+      factory:
+        aliases:
+          - pipeline-db
+
+networks:
+  factory:
+    name: music-factory
 
 volumes:
   pgdata:
