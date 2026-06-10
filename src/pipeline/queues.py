@@ -33,12 +33,16 @@ class PlatformSource:
     windowed: bool = False             # full tracks → RMS-peak windows
     discovery_activity: str | None = None  # activity name (string: sandbox-safe dispatch)
     refresher: str | None = None           # "module:function" for expired audio URLs
+    # Concurrency cap is ORTHOGONAL to the per-second budget (mined from the
+    # old fleet): rate caps schedule starts; this bounds simultaneous
+    # in-flight fetches per platform (slow responses pile up otherwise).
+    io_concurrency: int = 4
 
 
 PLATFORMS: dict[str, PlatformSource] = {
     # ~50/s observed ceiling (proxy-limited upstream); sustained-presence polite.
     "deezer": PlatformSource(
-        "deezer", 10.0, audio_priority=1, floor=10, windowed=False,
+        "deezer", 10.0, io_concurrency=8, audio_priority=1, floor=10, windowed=False,
         discovery_activity="discover_deezer_tracks",
         refresher="pipeline.sources.deezer:refresh_preview",
     ),
@@ -64,7 +68,7 @@ PLATFORMS: dict[str, PlatformSource] = {
     # Discovery stores audio_url=NULL candidates (2-8min band) — extraction
     # is design-gated. No refresher: nothing fetchable to refresh.
     "youtube": PlatformSource(
-        "youtube", 0.1, audio_priority=4, floor=None, windowed=True,
+        "youtube", 0.1, io_concurrency=1, audio_priority=4, floor=None, windowed=True,
         discovery_activity="discover_youtube_tracks",
     ),
     # Community-confirmed ≈0.2/s; playback/URL asset only — never audio.

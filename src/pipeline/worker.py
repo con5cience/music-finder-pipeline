@@ -24,7 +24,7 @@ from temporalio.worker import Worker
 
 from pipeline import activities
 from pipeline.config import Settings
-from pipeline.queues import DISCOVERY_ACTIVITIES, GPU_QUEUE, PLATFORM_QUEUES
+from pipeline.queues import DISCOVERY_ACTIVITIES, GPU_QUEUE, PLATFORM_QUEUES, PLATFORMS
 from pipeline.workflows import IngestArtistWorkflow
 
 # DERIVED from the PLATFORMS descriptor — never hand-edit (review finding:
@@ -61,6 +61,8 @@ def build_workers(client: Client, settings: Settings, role: str = "all") -> list
                     task_queue=cfg.name,
                     activities=acts,
                     max_task_queue_activities_per_second=cfg.max_per_second,
+                    # orthogonal to the rate budget: bounds in-flight fetches
+                    max_concurrent_activities=PLATFORMS[platform].io_concurrency,
                 )
             )
     if role in ("all", "gpu"):

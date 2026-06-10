@@ -91,3 +91,10 @@ def test_audio_platforms_have_coherent_descriptors():
 def test_priority_order_is_dense_and_unique():
     prios = [p.audio_priority for p in PLATFORMS.values() if p.audio_priority is not None]
     assert sorted(prios) == list(range(1, len(prios) + 1))
+
+
+def test_io_concurrency_caps_are_sane():
+    # Mined from the old fleet: concurrency is orthogonal to rate budgets.
+    for p in PLATFORMS.values():
+        assert 1 <= p.io_concurrency <= 16
+    assert PLATFORMS["youtube"].io_concurrency == 1  # most fragile platform
