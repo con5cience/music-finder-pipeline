@@ -84,8 +84,8 @@ services:
   # the host (one-time: sudo apt install nvidia-container-toolkit &&
   # sudo nvidia-ctk runtime configure --runtime=docker && restart docker).
   worker-gpu:
-    build: .  # every image-sharing service carries build: — 
-              # silently NO-OPS on build-less services (stale-image incident)
+    build: .  # every image-sharing service carries build: — a targeted
+              # compose build silently NO-OPS without it (stale-image incident)
     image: music-finder-pipeline:local
     restart: unless-stopped
     command: ["--role", "gpu"]
