@@ -32,6 +32,18 @@ sudo docker compose logs -f worker-io      # fleet logs
 - Liveness: `worker_heartbeat` table (30s beat; >90s stale) — surfaced on
   the admin Pipeline Fleet card and `uv run poe factory-status -- --watch`.
 
+## Reboot
+
+Everything self-starts: docker is boot-enabled, every service (both
+composes) carries a restart policy, volumes/networks persist, and the
+SEEDER is a compose service that resumes the mass build from the ledgers.
+After any reboot, verify with one glance at the admin Pipeline Fleet card
+(two live workers) or `uv run poe factory-status`. NOT auto-resumed (host
+one-shots by design): search-bind waves, backfill sweeps — rerun via poe if
+they were mid-flight. Config-change caveat: `docker compose up -d` RECREATES
+services whose definition changed — that bounces factory-db too; pause
+nothing, everything reconnects, but expect a ~60s blip.
+
 ## One-shot ops (no cron by design)
 
 | Command | What |
