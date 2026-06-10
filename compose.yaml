@@ -17,6 +17,7 @@ services:
   # pipeline-db alias.
   factory-db:
     image: pgvector/pgvector:pg16  # postgres:16 + the pgvector extension (embedding tables)
+    restart: unless-stopped  # reboot audit: EVERYTHING depends on this one
     environment:
       POSTGRES_USER: pipeline
       POSTGRES_PASSWORD: pipeline
@@ -109,6 +110,22 @@ services:
             - driver: nvidia
               count: 1
               capabilities: ["gpu"]
+    depends_on:
+      - factory-db
+      - temporal
+
+  # The mass build itself, reboot-proof: resumes from the ledgers on every
+  # start (natural pagination — embedded artists and terminal verdicts drop
+  # out of the seed query). Exits 0 on corpus exhaustion; on-failure restart
+  # leaves a finished build finished.
+  seeder:
+    image: music-finder-pipeline:local
+    restart: on-failure
+    entrypoint: [".venv/bin/python", "-m", "pipeline.wave_seeder"]
+    command: ["--total", "451000", "--batch", "1000", "--low-water", "2000"]
+    environment:
+      PIPELINE_DATABASE_URL: postgresql://pipeline:pipeline@factory-db:5432/pipeline
+      PIPELINE_TEMPORAL_ADDRESS: temporal:7233
     depends_on:
       - factory-db
       - temporal
