@@ -52,10 +52,9 @@ clips = [Clip(id=str(i), artist_id="x", path=p) for i, p in enumerate(paths)]
 emb = get_embedder()
 v32 = np.asarray(emb.embed(clips))
 torch.cuda.reset_peak_memory_stats()
-m = emb._model if hasattr(emb, "_model") else None
 print("fp32 peak MB:", torch.cuda.max_memory_allocated() // 2**20)
 try:
-    emb._model = emb._model.half()
+    emb.model = emb.model.half()
     torch.cuda.reset_peak_memory_stats()
     v16 = np.asarray(emb.embed(clips))
     cos = (v32 * v16).sum(1) / (np.linalg.norm(v32, axis=1) * np.linalg.norm(v16, axis=1) + 1e-9)
@@ -71,6 +70,10 @@ timeout 3600 $PY -m pipeline.wave3 --head stems --limit 12 >> "$LOG" 2>&1
 timeout 1800 $PY -m pipeline.wave3 --head asr --limit 25 >> "$LOG" 2>&1
 log "wave-3 demos done"
 
+if [ "${MAINT_SKIP_CONC:-0}" = "1" ]; then
+  log "stage 4 skipped (data already captured: ~1746/hr, 4 OOMs)"
+  RATE=skipped; OOMS=skipped
+else
 log "--- stage 4: conc-3 retest (20 min, auto-revert) ---"
 sed -i 's/PIPELINE_GPU_CONCURRENCY: "2"/PIPELINE_GPU_CONCURRENCY: "3"/' compose.yaml
 sg docker -c "docker compose up -d worker-gpu" >> "$LOG" 2>&1
@@ -81,6 +84,7 @@ import psycopg
 c = psycopg.connect('postgresql://pipeline:pipeline@localhost:5440/pipeline')
 print(c.execute(\"SELECT count(*) FROM artist_embedding WHERE computed_at > now() - interval '20 minutes'\").fetchone()[0] * 3)")
 log "conc-3 retest: ~$RATE/hr, OOMs=$OOMS"
+fi
 # trap restores conc 2 + restarts
 
 {

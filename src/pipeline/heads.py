@@ -135,10 +135,12 @@ class PerceptualHead:
             return False  # no scorer/clips — must NOT be ledgered (review finding)
         import json
 
-        mean = vecs.mean(axis=0)
+        mean = np.nan_to_num(vecs.mean(axis=0))
         mean /= np.linalg.norm(mean) + 1e-9
         anchors = self._anchor_matrix()
-        scores = anchors @ mean
+        # NaN guard (maintenance-window incident: one silent/zero-norm track
+        # produced NaN scores; json rejects NaN and the whole batch aborted)
+        scores = np.nan_to_num(anchors @ mean)
 
         n_axes = len(AXIS_ANCHORS)
         axis_vals = {}

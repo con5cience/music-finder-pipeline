@@ -116,11 +116,23 @@ class StemsHead:
         if self._sep is None:
             try:
                 import torch
-                from demucs.api import Separator
+                from demucs.apply import apply_model
+                from demucs.pretrained import get_model
             except ImportError as e:  # pragma: no cover
                 raise RuntimeError("stems head needs the wave3 extra: uv sync --extra wave3") from e
+
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            self._sep = Separator(model="htdemucs", device=device, progress=False)
+            model = get_model("htdemucs").to(device).eval()
+
+            class _Sep:  # PyPI demucs is 4.0.x — adapt the classic API to ours
+                samplerate = model.samplerate
+
+                def separate_tensor(self, wav, sr=None):
+                    with torch.no_grad():
+                        out = apply_model(model, wav.unsqueeze(0).to(device), progress=False)[0]
+                    return None, dict(zip(model.sources, out.cpu(), strict=True))
+
+            self._sep = _Sep()
         return self._sep
 
     def run(self, conn: Connection, track_id, mono: np.ndarray, sr: int) -> bool:
