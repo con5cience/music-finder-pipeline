@@ -576,6 +576,7 @@ models = [
     { name = "torchvision", version = "0.26.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'linux'" },
     { name = "torchvision", version = "0.27.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
     { name = "transformers" },
+    { name = "yt-dlp" },
 ]
 muq = [
     { name = "muq" },
@@ -611,6 +612,7 @@ models = [
     { name = "torchvision", marker = "sys_platform != 'linux'", specifier = ">=0.17" },
     { name = "torchvision", marker = "sys_platform == 'linux'", specifier = ">=0.17", index = "https://download.pytorch.org/whl/cu128" },
     { name = "transformers", specifier = ">=4.40" },
+    { name = "yt-dlp", specifier = ">=2026.1" },
 ]
 muq = [{ name = "muq", specifier = ">=0.1" }]
 
@@ -1654,4 +1656,13 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f3/d7/f056e8e114b85df6f30f7c22fd75fb273182306ea95b36c6f2089c8ff52a/x-clip-0.14.4.tar.gz", hash = "sha256:e2539953f1c81a2ab892843c2bc02c218f4ac410cf10ce37495830f6a0e259c6", size = 1355000, upload-time = "2023-10-16T15:04:08.619Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c6/41/44c4b2336824263ebcbfa16e8fd7fd4ca010183aa7587779a405ee5ab2b5/x_clip-0.14.4-py3-none-any.whl", hash = "sha256:2e9842330bc4539916e54a22c1d4352b60b838507e0736e98e4fb74fd9972f7a", size = 1374025, upload-time = "2023-10-16T15:04:06.814Z" },
+]
+
+[[package]]
+name = "yt-dlp"
+version = "2026.6.9"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/88/a4/1b0979d28f87774bb67fbbc66bce44f9dd1aa0e547a99e22985fac945c33/yt_dlp-2026.6.9.tar.gz", hash = "sha256:d50fcb95f48d61bedde33e408c1881d4c279e51c31354a599ce09e96ba0f4b86", size = 3030590, upload-time = "2026-06-09T23:27:14.831Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f3/ee/188a3dadf9dfdac713243521f919feca1cd091d4358c9ea7e8ebb710a7cc/yt_dlp-2026.6.9-py3-none-any.whl", hash = "sha256:442ba4c75724b9496144c8434b617962ee08d0ee7c26ec663848fe9b78d5a3e4", size = 3169035, upload-time = "2026-06-09T23:27:12.58Z" },
 ]

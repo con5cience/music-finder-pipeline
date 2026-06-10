@@ -57,8 +57,13 @@ PLATFORMS: dict[str, PlatformSource] = {
         discovery_activity="discover_soundcloud_tracks",
         refresher="pipeline.sources.soundcloud:refresh_soundcloud",
     ),
-    # Fragile scraping; url-rel-only scope; floor experimental.
-    "youtube": PlatformSource("youtube", 0.1, audio_priority=4, floor=None, windowed=True),
+    # EXPERIMENTAL (floor None: scanned, recorded, never auto-embeds).
+    # Discovery stores audio_url=NULL candidates (2-8min band) — extraction
+    # is design-gated. No refresher: nothing fetchable to refresh.
+    "youtube": PlatformSource(
+        "youtube", 0.1, audio_priority=4, floor=None, windowed=True,
+        discovery_activity="discover_youtube_tracks",
+    ),
     # Community-confirmed ≈0.2/s; playback/URL asset only — never audio.
     "tidal": PlatformSource("tidal", 0.2),
     # MB TOS: 1 req/s, never deviate. UA must carry a real contact email.

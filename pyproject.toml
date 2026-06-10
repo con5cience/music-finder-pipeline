@@ -37,6 +37,7 @@ models = [
     "librosa>=0.10",
     "pyacoustid>=1.3",  # needs system libchromaprint (present on box + in apt)
     "pyloudnorm>=0.1",
+    "yt-dlp>=2026.1",  # YT flat discovery (Unlicense); extraction stays design-gated
 ]
 # MuQ / MuQ-MuLan — separate, heavier package; box-primarily.
 muq = [

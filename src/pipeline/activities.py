@@ -145,6 +145,26 @@ async def discover_soundcloud_tracks(artist_id: str, platform_id: str | None = N
     return await asyncio.to_thread(_discover_soundcloud_sync, artist_id, platform_id)
 
 
+def _discover_youtube_sync(artist_id: str, platform_id: str | None) -> int:
+    from pipeline.sources.youtube import discover_youtube
+
+    settings = Settings()
+    with psycopg.connect(settings.database_url) as conn:
+        pid = _resolve_platform_id(conn, "youtube", artist_id, platform_id)
+        if pid is None:
+            return 0
+        n = discover_youtube(conn, artist_id, pid)
+        conn.commit()
+    return n
+
+
+@activity.defn
+async def discover_youtube_tracks(artist_id: str, platform_id: str | None = None) -> int:
+    """EXPERIMENTAL: flat-extract ONE channel's newest videos (0.1/s budget),
+    store the 2-8min band as unembeddable candidates (audio_url NULL)."""
+    return await asyncio.to_thread(_discover_youtube_sync, artist_id, platform_id)
+
+
 @functools.cache
 def _embedder():
     # Lazy: torch + model deps only load in workers that run this activity.

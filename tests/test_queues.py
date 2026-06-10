@@ -79,9 +79,10 @@ def test_audio_platforms_have_coherent_descriptors():
         if p.audio_priority is not None:
             assert p.name in EMBED_FLOORS
             assert p.name in EMBED_PRIORITY
-            # any audio platform WITH a discovery flow must also refresh
-            # (signed URLs rot on every platform we've met so far)
-            if p.discovery_activity:
+            # any NON-EXPERIMENTAL audio platform with a discovery flow must
+            # also refresh (signed URLs rot everywhere we fetch audio).
+            # Experimental (floor None) stores audio_url=NULL — nothing rots.
+            if p.discovery_activity and p.floor is not None:
                 assert p.refresher, f"{p.name}: discovery without a refresher"
         else:
             assert p.name not in EMBED_PRIORITY  # playback/identity assets never cascade
