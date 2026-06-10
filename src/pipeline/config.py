@@ -6,6 +6,7 @@ defaults to auto-detection (see device.select_device) unless pinned.
 
 from __future__ import annotations
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pipeline.device import select_device
@@ -37,6 +38,19 @@ class Settings(BaseSettings):
     # Outbound proxy for crawl-heavy platforms (Deezer API, Bandcamp HTML —
     # ADR-017 proxy law). None → direct. Never used for token-bearing platforms.
     proxy_url: str | None = None
+
+    # SoundCloud registered-app credentials (official API, client_credentials).
+    # Bare env names — shared convention with the sibling repo's .env.
+    # Empirical (probe 2026-06-09): app-only tokens stream 30s INTRO previews
+    # regardless of track access/duration — SC is a preview-grade source.
+    soundcloud_client_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SOUNDCLOUD_CLIENT_ID", "PIPELINE_SOUNDCLOUD_CLIENT_ID"),
+    )
+    soundcloud_client_secret: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SOUNDCLOUD_CLIENT_SECRET", "PIPELINE_SOUNDCLOUD_CLIENT_SECRET"),
+    )
 
     @property
     def effective_device(self) -> str:

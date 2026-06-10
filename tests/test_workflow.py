@@ -148,7 +148,7 @@ async def test_discovery_outage_falls_through_not_fatal():
 
 
 async def test_platform_without_flow_is_skipped_not_fatal():
-    # soundcloud has no discovery activity yet: identity stays pending, the
+    # youtube has no discovery activity yet: identity stays pending, the
     # cascade moves on, and choose still runs (an earlier-scanned source or
     # nothing may win). NB: must use a genuinely flow-less platform — this
     # test hung for 30 minutes when bandcamp gained a flow and the dispatch
@@ -158,9 +158,9 @@ async def test_platform_without_flow_is_skipped_not_fatal():
     async with env:
         res = await _run(
             env,
-            _mock_plan([["soundcloud", "s1"], ["deezer", "d1"]]),
+            _mock_plan([["youtube", "y1"], ["deezer", "d1"]]),
             _mock_record_scan(12, calls),
             _mock_choose({"source": "deezer", "ratio": 1.2}),
         )
     assert res["status"] == "embedded"
-    assert calls == ["deezer"]  # soundcloud never scanned (no flow), deezer was
+    assert calls == ["deezer"]  # youtube never scanned (no flow), deezer was

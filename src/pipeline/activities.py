@@ -124,6 +124,27 @@ async def discover_bandcamp_tracks(artist_id: str, platform_id: str | None = Non
     return await asyncio.to_thread(_discover_bandcamp_sync, artist_id, platform_id)
 
 
+def _discover_soundcloud_sync(artist_id: str, platform_id: str | None) -> int:
+    from pipeline.sources.soundcloud import discover_soundcloud
+
+    settings = Settings()
+    with psycopg.connect(settings.database_url) as conn:
+        pid = _resolve_platform_id(conn, "soundcloud", artist_id, platform_id)
+        if pid is None:
+            return 0
+        n = discover_soundcloud(conn, artist_id, pid)
+        conn.commit()
+    return n
+
+
+@activity.defn
+async def discover_soundcloud_tracks(artist_id: str, platform_id: str | None = None) -> int:
+    """List ONE SoundCloud identity's newest tracks via the official API
+    (rate-capped on soundcloud-io); stores 30s intro previews (the app-only
+    API tier streams nothing longer — see sources/soundcloud.py)."""
+    return await asyncio.to_thread(_discover_soundcloud_sync, artist_id, platform_id)
+
+
 @functools.cache
 def _embedder():
     # Lazy: torch + model deps only load in workers that run this activity.

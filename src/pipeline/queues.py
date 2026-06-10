@@ -48,8 +48,15 @@ PLATFORMS: dict[str, PlatformSource] = {
         discovery_activity="discover_bandcamp_tracks",
         refresher="pipeline.sources.bandcamp:refresh_bandcamp",
     ),
-    # OAuth headroom at 50/s; discovery flow not built yet.
-    "soundcloud": PlatformSource("soundcloud", 5.0, audio_priority=3, floor=3, windowed=True),
+    # Official API, registered app. EMPIRICAL (2026-06-09): app-only tokens
+    # stream 30s INTRO previews regardless of access level — preview-grade
+    # source: floor 10 (not the original 3-full-tracks assumption), not
+    # windowed. One-line change here if user-OAuth full streams ever land.
+    "soundcloud": PlatformSource(
+        "soundcloud", 5.0, audio_priority=3, floor=10, windowed=False,
+        discovery_activity="discover_soundcloud_tracks",
+        refresher="pipeline.sources.soundcloud:refresh_soundcloud",
+    ),
     # Fragile scraping; url-rel-only scope; floor experimental.
     "youtube": PlatformSource("youtube", 0.1, audio_priority=4, floor=None, windowed=True),
     # Community-confirmed ≈0.2/s; playback/URL asset only — never audio.
