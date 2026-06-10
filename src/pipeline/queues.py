@@ -22,6 +22,9 @@ WORKFLOW_QUEUE = "pipeline"  # workflows + fast DB activities (cascade plan/scan
 # GPU work is concurrency-capped (VRAM), not rate-capped: its own queue so slow
 # embeds never occupy the pipeline queue's slots (observed live: 9h ETA stall).
 GPU_QUEUE = "gpu"
+# CPU staging lane (throughput campaign): fetch/decode/windows/CPU-heads run
+# here at high concurrency so the gpu queue is pure inference.
+PREP_QUEUE = "prep"
 
 
 @dataclass(frozen=True)

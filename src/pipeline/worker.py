@@ -24,7 +24,7 @@ from temporalio.worker import Worker
 
 from pipeline import activities
 from pipeline.config import Settings
-from pipeline.queues import DISCOVERY_ACTIVITIES, GPU_QUEUE, PLATFORM_QUEUES, PLATFORMS
+from pipeline.queues import DISCOVERY_ACTIVITIES, GPU_QUEUE, PLATFORM_QUEUES, PLATFORMS, PREP_QUEUE
 from pipeline.workflows import IngestArtistWorkflow
 
 # DERIVED from the PLATFORMS descriptor — never hand-edit (review finding:
@@ -65,6 +65,15 @@ def build_workers(client: Client, settings: Settings, role: str = "all") -> list
                     max_concurrent_activities=PLATFORMS[platform].io_concurrency,
                 )
             )
+    if role in ("all", "io"):
+        workers.append(Worker(
+            client,
+            task_queue=PREP_QUEUE,
+            activities=[activities.prep_artist_clips],
+            # CPU staging: fetch+decode+CPU heads; 8 keeps the gpu lane fed
+            # without saturating decode CPU (measured in the campaign).
+            max_concurrent_activities=8,
+        ))
     if role in ("all", "gpu"):
         import os
 

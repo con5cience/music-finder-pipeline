@@ -71,8 +71,10 @@ services:
       PIPELINE_DATABASE_URL: postgresql://pipeline:pipeline@factory-db:5432/pipeline
       PIPELINE_TEMPORAL_ADDRESS: temporal:7233
       PIPELINE_FETCH_CACHE_DIR: /cache/fetch-cache
+      PIPELINE_STAGE_DIR: /stage
     volumes:
       - fetch-cache:/cache/fetch-cache
+      - clip-stage:/stage
     depends_on:
       - factory-db
       - temporal
@@ -89,6 +91,7 @@ services:
       PIPELINE_DATABASE_URL: postgresql://pipeline:pipeline@factory-db:5432/pipeline
       PIPELINE_TEMPORAL_ADDRESS: temporal:7233
       PIPELINE_FETCH_CACHE_DIR: /cache/fetch-cache
+      PIPELINE_STAGE_DIR: /stage
       HF_HOME: /hf
       PIPELINE_GPU_CONCURRENCY: "2"  # proven ceiling (13.1GB peak). conc-4
       # REQUIRES true fp16 (model.half()) — autocast BACKFIRED live (it
@@ -97,6 +100,7 @@ services:
       PIPELINE_FP16: "0"
     volumes:
       - fetch-cache:/cache/fetch-cache
+      - clip-stage:/stage
       - hf-cache:/hf
     deploy:
       resources:
@@ -116,4 +120,5 @@ networks:
 volumes:
   pgdata:
   fetch-cache:
+  clip-stage:
   hf-cache:

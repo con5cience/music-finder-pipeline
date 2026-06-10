@@ -48,6 +48,16 @@ async def mock_embed(artist_id: str, source: str | None = None, ratio: float | N
     return 12
 
 
+@activity.defn(name="prep_artist_clips")
+async def mock_prep(artist_id: str, source: str | None = None) -> int:
+    return 3
+
+
+@activity.defn(name="embed_artist_staged")
+async def mock_embed_staged(artist_id: str, source: str | None = None, ratio: float | None = None) -> int:
+    return 12
+
+
 @activity.defn(name="discover_deezer_tracks")
 async def mock_discover(artist_id: str, platform_id: str | None = None) -> int:
     assert platform_id is not None  # the cascade must name WHICH identity (review finding)
@@ -72,7 +82,8 @@ async def _run(env: WorkflowEnvironment, plan, record, choose) -> dict:
         Worker(env.client, task_queue=tq, workflows=[IngestArtistWorkflow],
                activities=[plan, record, choose, mock_embed]),
         Worker(env.client, task_queue="deezer-io", activities=[mock_discover]),
-        Worker(env.client, task_queue="gpu", activities=[mock_embed]),
+        Worker(env.client, task_queue="gpu", activities=[mock_embed, mock_embed_staged]),
+        Worker(env.client, task_queue="prep", activities=[mock_prep]),
     ):
         return await env.client.execute_workflow(
             IngestArtistWorkflow.run,
@@ -135,7 +146,8 @@ async def test_discovery_outage_falls_through_not_fatal():
                    activities=[_mock_plan([["deezer", "d1"]]), _mock_record_scan(0, calls),
                                _mock_choose(None), mock_embed]),
             Worker(env.client, task_queue="deezer-io", activities=[mock_discover_failing]),
-            Worker(env.client, task_queue="gpu", activities=[mock_embed]),
+            Worker(env.client, task_queue="gpu", activities=[mock_embed, mock_embed_staged]),
+        Worker(env.client, task_queue="prep", activities=[mock_prep]),
         ):
             res = await env.client.execute_workflow(
                 IngestArtistWorkflow.run,

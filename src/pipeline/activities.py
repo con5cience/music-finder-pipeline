@@ -165,6 +165,43 @@ async def discover_youtube_tracks(artist_id: str, platform_id: str | None = None
     return await asyncio.to_thread(_discover_youtube_sync, artist_id, platform_id)
 
 
+def _prep_sync(artist_id: str, source: str | None) -> int:
+    from pipeline.embedders.registry import DEFAULT_EMBEDDER
+    from pipeline.staging import prep_artist
+
+    settings = Settings()
+    model = settings.embedding_model or DEFAULT_EMBEDDER
+    with psycopg.connect(settings.database_url) as conn:
+        n = prep_artist(conn, artist_id, source, model)
+        conn.commit()
+    return n
+
+
+@activity.defn
+async def prep_artist_clips(artist_id: str, source: str | None = None) -> int:
+    """Throughput campaign: CPU staging (fetch/decode/windows/CPU heads) on
+    the prep queue so the GPU lane runs pure inference."""
+    return await asyncio.to_thread(_prep_sync, artist_id, source)
+
+
+def _embed_staged_sync(artist_id: str, source: str | None, ratio: float | None) -> int:
+    from pipeline.heads import build_heads
+    from pipeline.staging import embed_staged
+
+    settings = Settings()
+    with psycopg.connect(settings.database_url) as conn:
+        n = embed_staged(conn, _embedder(), artist_id, source, ratio,
+                         heads=build_heads(_tag_scorer()))
+        conn.commit()
+    return n
+
+
+@activity.defn
+async def embed_artist_staged(artist_id: str, source: str | None = None, ratio: float | None = None) -> int:
+    """Pure-inference embed from the staged manifest (legacy fallback inside)."""
+    return await asyncio.to_thread(_embed_staged_sync, artist_id, source, ratio)
+
+
 @functools.cache
 def _embedder():
     # Lazy: torch + model deps only load in workers that run this activity.

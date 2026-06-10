@@ -19,7 +19,7 @@ from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
     from pipeline import activities
-    from pipeline.queues import DISCOVERY_ACTIVITIES, EMBED_FLOORS, GPU_QUEUE, queue_for
+    from pipeline.queues import DISCOVERY_ACTIVITIES, EMBED_FLOORS, GPU_QUEUE, PREP_QUEUE, queue_for
 
 _ACTIVITY_TIMEOUT = timedelta(seconds=30)
 _DISCOVERY_TIMEOUT = timedelta(minutes=5)  # platform IO behind a rate-capped queue
@@ -84,13 +84,32 @@ class IngestArtistWorkflow:
         if choice is None:
             return {"status": "no_signal", "scanned": scanned}
 
-        embedded = await workflow.execute_activity(
-            activities.embed_artist,
-            args=[inp.artist_id, choice["source"], choice["ratio"]],
-            task_queue=GPU_QUEUE,
-            start_to_close_timeout=_EMBED_TIMEOUT,
-            retry_policy=_IO_RETRY,
-        )
+        if workflow.patched("staged-embed"):
+            # Throughput campaign: CPU staging first (prep queue, high
+            # concurrency), then a pure-inference GPU activity. patched()
+            # keeps the ~2k in-flight pre-campaign runs deterministic.
+            await workflow.execute_activity(
+                activities.prep_artist_clips,
+                args=[inp.artist_id, choice["source"]],
+                task_queue=PREP_QUEUE,
+                start_to_close_timeout=_EMBED_TIMEOUT,
+                retry_policy=_IO_RETRY,
+            )
+            embedded = await workflow.execute_activity(
+                activities.embed_artist_staged,
+                args=[inp.artist_id, choice["source"], choice["ratio"]],
+                task_queue=GPU_QUEUE,
+                start_to_close_timeout=_EMBED_TIMEOUT,
+                retry_policy=_IO_RETRY,
+            )
+        else:
+            embedded = await workflow.execute_activity(
+                activities.embed_artist,
+                args=[inp.artist_id, choice["source"], choice["ratio"]],
+                task_queue=GPU_QUEUE,
+                start_to_close_timeout=_EMBED_TIMEOUT,
+                retry_policy=_IO_RETRY,
+            )
         return {
             "status": "embedded",
             "source": choice["source"],
