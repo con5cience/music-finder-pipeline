@@ -35,14 +35,29 @@ def fetch_channel_videos(channel_id: str) -> list[dict]:
         "no_warnings": True,
         "playlist_items": f"1-{_WALK_LIMIT}",
     }
-    try:
+    def _extract(url: str) -> list[dict]:
         with yt_dlp.YoutubeDL(opts) as y:
-            info = y.extract_info(f"https://www.youtube.com/channel/{channel_id}/videos", download=False)
+            info = y.extract_info(url, download=False)
+        entries = info.get("entries") or []
+        # bare-channel extraction returns TABS as nested playlists — flatten one level
+        flat: list[dict] = []
+        for e in entries:
+            if e and e.get("entries"):
+                flat.extend(x for x in e["entries"] if x)
+            elif e:
+                flat.append(e)
+        return flat
+
+    try:
+        return _extract(f"https://www.youtube.com/channel/{channel_id}/videos")
     except yt_dlp.utils.DownloadError:
-        # channel-shape variants (no /videos tab, terminated, music-only
-        # topic channels) — a clean EMPTY verdict, not a retry storm
-        return []
-    return [e for e in (info.get("entries") or []) if e]
+        # No /videos tab — usually an auto-generated TOPIC channel (an artist
+        # channel whose music sits behind Releases). Fall back to the bare
+        # channel URL and let yt-dlp pick whatever tabs exist.
+        try:
+            return _extract(f"https://www.youtube.com/channel/{channel_id}")
+        except yt_dlp.utils.DownloadError:
+            return []  # terminated/empty — clean EMPTY verdict
 
 
 def music_band(entries: list[dict]) -> list[dict]:

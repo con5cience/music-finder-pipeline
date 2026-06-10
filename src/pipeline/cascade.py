@@ -27,11 +27,17 @@ def audio_identities(conn: Connection, artist_id: str) -> list[tuple[str, str, s
 
 
 def source_yields(conn: Connection, artist_id: str) -> dict[str, int]:
-    """platform → count of embeddable tracks discovered for this artist."""
+    """platform → discovered-track count. Embeddability is audio_url IS NOT
+    NULL for audio platforms; youtube candidates are NULL BY DESIGN (ADR-017
+    extraction gate) yet a fruitful scan must still verdict 'scanned' — the
+    old embeddable-only count recorded 846 video-bearing channels as 'empty'.
+    choose_source() never picks youtube (no floor entry), so counting its
+    candidates here cannot leak into embed decisions."""
     return dict(
         conn.execute(
             "SELECT platform, count(*) FROM audio_track "
-            "WHERE artist_id = %s AND audio_url IS NOT NULL "
+            "WHERE artist_id = %s "
+            "  AND (audio_url IS NOT NULL OR platform = 'youtube') "
             "  AND verification_status NOT IN ('rejected','quarantined') "
             "GROUP BY platform",
             (artist_id,),
