@@ -155,3 +155,21 @@ def test_review_poller_skips_pending_and_rejected(conn):
     assert conn.execute(
         "SELECT count(*) FROM platform_identity WHERE artist_id = %s", (a,)
     ).fetchone()[0] == 0
+
+
+def test_searcher_error_skips_without_verdict(conn):
+    # Per-source isolation (mined fleet lesson): a transient upstream error
+    # must neither raise out of the caller's loop pattern nor write a ledger
+    # verdict — the platform stays searchable on the next pass.
+    import pytest as _pytest
+
+    a = _artist(conn, name="ZZ Err Fixture", mbid="00000000-feed-4bad-9bad-000000000893")
+
+    def boom(conn_, name):
+        raise RuntimeError("fetch failed upstream (403)")
+
+    with _pytest.raises(RuntimeError):
+        bind_artist_on_platform(conn, str(a), "ZZ Err Fixture", "deezer", searcher=boom)
+    assert conn.execute(
+        "SELECT count(*) FROM search_attempt WHERE artist_id = %s", (a,)
+    ).fetchone()[0] == 0  # no verdict ledgered → retryable

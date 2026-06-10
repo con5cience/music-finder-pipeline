@@ -206,7 +206,15 @@ def main() -> None:
                 break
             for aid, name in rows:
                 for platform in SEARCHERS:
-                    v = bind_artist_on_platform(conn, str(aid), name, platform)
+                    try:
+                        v = bind_artist_on_platform(conn, str(aid), name, platform)
+                    except Exception as e:  # noqa: BLE001 — per-source isolation
+                        # (mined fleet lesson): one transient upstream error
+                        # (e.g. Akamai 403) must not kill the run NOR write a
+                        # verdict — the platform stays searchable next pass.
+                        print(f"  {platform} error for {name!r}: {e} — skipped", flush=True)
+                        stats["error"] = stats.get("error", 0) + 1
+                        continue
                     stats[v] += 1
                 done += 1
                 time.sleep(args.sleep)
