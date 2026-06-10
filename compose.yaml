@@ -9,7 +9,13 @@
 # publishing stays loopback-only (5440); the shared network adds no off-host
 # exposure. Bring the factory up before the app.
 services:
-  db:
+  # Named factory-db (NOT `db`): compose adds the service name as a DNS alias
+  # on EVERY attached network, and the serving app's project also has a `db`
+  # — the collision made the app's own database lookups resolve HERE through
+  # the shared music-factory network (live incident 2026-06-10). Unique name
+  # = unambiguous DNS on shared networks; in-network consumers use the
+  # pipeline-db alias.
+  factory-db:
     image: pgvector/pgvector:pg16  # postgres:16 + the pgvector extension (embedding tables)
     environment:
       POSTGRES_USER: pipeline
