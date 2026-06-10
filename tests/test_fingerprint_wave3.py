@@ -121,3 +121,48 @@ def test_structure_head_sections(conn):
     # too-short audio declines (returns False, no row)
     t2 = _track(conn, art, "zz-st3-2")
     assert head.run(conn, t2, _song(13, 5), SR) is False
+
+
+def test_stems_head_with_fake_separator(conn):
+    from pipeline.wave3 import StemsHead
+
+    class FakeSep:
+        samplerate = 44100
+
+        def separate_tensor(self, wav, sr=None):
+            import torch
+            n = wav.shape[-1]
+            return None, {
+                "vocals": torch.full((2, n), 0.3), "drums": torch.full((2, n), 0.1),
+                "bass": torch.full((2, n), 0.1), "other": torch.full((2, n), 0.1),
+            }
+
+    art = _artist(conn, "Stems Fixture", "00000000-feed-4bad-9bad-000000000fc1")
+    tid = _track(conn, art, "zz-w3s-1")
+    head = StemsHead(separator=FakeSep())
+    assert head.run(conn, tid, _song(21, 30), SR) is True
+    v, d = conn.execute(
+        "SELECT vocal_ratio, drums_ratio FROM track_stems WHERE track_id = %s", (tid,)).fetchone()
+    assert v == pytest.approx(0.75, abs=0.02)  # 0.09 of 0.12 total energy
+    assert d == pytest.approx(0.0833, abs=0.02)
+    assert head.run(conn, _track(conn, art, "zz-w3s-2"), _song(22, 3), SR) is False
+
+
+def test_asr_head_with_fake_model(conn):
+    from pipeline.wave3 import AsrHead
+
+    class Info:
+        language = "fr"
+        language_probability = 0.91
+
+    class FakeModel:
+        def transcribe(self, clip, language=None, vad_filter=True):
+            return iter(()), Info()
+
+    art = _artist(conn, "ASR Fixture", "00000000-feed-4bad-9bad-000000000fc2")
+    tid = _track(conn, art, "zz-w3a-1")
+    head = AsrHead(model=FakeModel())
+    assert head.run(conn, tid, _song(23, 20), SR) is True
+    lang, conf = conn.execute(
+        "SELECT language, confidence FROM track_language WHERE track_id = %s", (tid,)).fetchone()
+    assert lang == "fr" and conf == pytest.approx(0.91)

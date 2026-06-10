@@ -15,6 +15,12 @@ dependencies = [
     "psycopg[binary]>=3.3.4",
 ]
 
+[project.optional-dependencies]
+wave3 = [
+    "demucs>=4.0.1",
+    "faster-whisper>=1.2.1",
+]
+
 [dependency-groups]
 dev = [
     "poethepoet>=0.46.0",
