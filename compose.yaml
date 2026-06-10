@@ -31,9 +31,84 @@ services:
         aliases:
           - pipeline-db
 
+  # --- production-maturation services (2026-06-10) -----------------------
+  # Temporal server persisted in the factory Postgres (its own database),
+  # replacing `temporal server start-dev` (SQLite, user-owned process).
+  temporal:
+    image: temporalio/auto-setup:1.25
+    restart: unless-stopped
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: pipeline
+      POSTGRES_PWD: pipeline
+      POSTGRES_SEEDS: factory-db
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+    ports:
+      - "127.0.0.1:7233:7233"
+    depends_on:
+      - factory-db
+
+  temporal-ui:
+    image: temporalio/ui:2.31.2
+    restart: unless-stopped
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "127.0.0.1:8233:8080"
+    depends_on:
+      - temporal
+
+  # IO fleet: workflows + DB activities + per-platform crawl queues. CPU.
+  worker-io:
+    build: .
+    image: music-finder-pipeline:local
+    restart: unless-stopped
+    command: ["--role", "io"]
+    env_file: .env
+    environment:
+      PIPELINE_DATABASE_URL: postgresql://pipeline:pipeline@factory-db:5432/pipeline
+      PIPELINE_TEMPORAL_ADDRESS: temporal:7233
+      PIPELINE_FETCH_CACHE_DIR: /cache/fetch-cache
+    volumes:
+      - fetch-cache:/cache/fetch-cache
+    depends_on:
+      - factory-db
+      - temporal
+
+  # GPU fleet: the embed queue only. Requires nvidia-container-toolkit on
+  # the host (one-time: sudo apt install nvidia-container-toolkit &&
+  # sudo nvidia-ctk runtime configure --runtime=docker && restart docker).
+  worker-gpu:
+    image: music-finder-pipeline:local
+    restart: unless-stopped
+    command: ["--role", "gpu"]
+    env_file: .env
+    environment:
+      PIPELINE_DATABASE_URL: postgresql://pipeline:pipeline@factory-db:5432/pipeline
+      PIPELINE_TEMPORAL_ADDRESS: temporal:7233
+      PIPELINE_FETCH_CACHE_DIR: /cache/fetch-cache
+      HF_HOME: /hf
+    volumes:
+      - fetch-cache:/cache/fetch-cache
+      - hf-cache:/hf
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
+    depends_on:
+      - factory-db
+      - temporal
+
 networks:
   factory:
     name: music-factory
 
 volumes:
   pgdata:
+  fetch-cache:
+  hf-cache:
