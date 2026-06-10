@@ -66,13 +66,18 @@ def build_workers(client: Client, settings: Settings, role: str = "all") -> list
                 )
             )
     if role in ("all", "gpu"):
+        import os
+
+        # Embed wall-time is download/decode-heavy (measured: GPU idle 60-70%
+        # at concurrency 2) — concurrency hides fetch latency. Env-tunable so
+        # VRAM tuning needs no rebuild; peak observed 10.8GB at 2, so step via
+        # 3 and watch nvidia-smi before 4.
+        gpu_conc = int(os.environ.get("PIPELINE_GPU_CONCURRENCY", "3"))
         workers.append(Worker(
             client,
             task_queue=GPU_QUEUE,
             activities=[activities.embed_artist],
-            # One GPU: concurrent embeds contend for VRAM (MuQ + activations
-            # × N). 2 keeps it fed without OOM on the 15.5GB card.
-            max_concurrent_activities=2,
+            max_concurrent_activities=gpu_conc,
         ))
     return workers
 

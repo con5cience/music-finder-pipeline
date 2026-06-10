@@ -33,7 +33,7 @@ def test_budgets_match_adr017():
     assert PLATFORM_QUEUES["youtube"].max_per_second == 0.1
     # start-conservative budgets stay at or under the sibling's observed ceilings
     assert PLATFORM_QUEUES["deezer"].max_per_second <= 50
-    assert PLATFORM_QUEUES["bandcamp"].max_per_second <= 1.0  # mass-scale 429 finding
+    assert PLATFORM_QUEUES["bandcamp"].max_per_second <= 5.0  # proxied; 429s monitored
     assert PLATFORM_QUEUES["soundcloud"].max_per_second <= 50
 
 

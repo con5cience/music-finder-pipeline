@@ -50,8 +50,10 @@ PLATFORMS: dict[str, PlatformSource] = {
     # limiter (366 429s in 30min). Bursts tolerate more; sustained does not.
     # 1/s holds. 429s are never cached and identities stay pending, so a
     # rate change re-scans them naturally.
+    # 1/s was the burned-home-IP era; through the proxy (ADR-017 law, now
+    # active) 3/s sustains — watch 429s on the fleet card when raising further.
     "bandcamp": PlatformSource(
-        "bandcamp", 1.0, audio_priority=2, floor=3, windowed=True,
+        "bandcamp", 3.0, audio_priority=2, floor=3, windowed=True,
         discovery_activity="discover_bandcamp_tracks",
         refresher="pipeline.sources.bandcamp:refresh_bandcamp",
     ),
