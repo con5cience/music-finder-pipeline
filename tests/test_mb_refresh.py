@@ -4,8 +4,6 @@ Hermetic: fixture-scale dumps via the bootstrap test helpers."""
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from pipeline.mb_refresh import REFRESH_TABLES, diff_and_apply, prepare_shadow, run_refresh, sanity_gates
