@@ -318,3 +318,40 @@ def test_perceptual_head_axes_and_instruments(conn, tmp_path):
     assert len(AXIS_ANCHORS) == 6
     # idempotent: current version recorded → second run is a no-op
     assert run_heads(conn, heads, ctx) == 0
+
+
+def test_tag_calibration_zscore_damps_prior_noise(conn):
+    # A "prior-noise" tag scores ~0.45 for EVERYTHING; a real signal tag
+    # scores 0.30 baseline but 0.50 on one track. Raw ranking puts the noise
+    # tag first; z-ranking must invert that.
+    from pipeline.tag_calibration import MIN_N, calibrated_tags, refresh_calibration
+    from pipeline.tags import replace_track_tags
+
+    a = conn.execute(
+        "INSERT INTO artist (display_name, mbid) VALUES ('Calib Fixture', "
+        "'00000000-feed-4bad-9bad-000000000892') RETURNING id"
+    ).fetchone()[0]
+    tracks = []
+    for i in range(MIN_N + 5):
+        t = conn.execute(
+            "INSERT INTO audio_track (artist_id, platform, platform_track_id, audio_url, duration_s, "
+            "binding_tier, verification_status) VALUES (%s,'deezer',%s,'/x.mp3',30,'A','verified') "
+            "RETURNING id",
+            (a, f"zz-cal-{i}"),
+        ).fetchone()[0]
+        tracks.append(t)
+    target = tracks[0]
+    for t in tracks:
+        scores = [("zz-noise-tag", 0.55), ("zz-signal-tag", 0.50 if t == target else 0.30)]
+        replace_track_tags(conn, t, scores)
+
+    n = refresh_calibration(conn)
+    assert n >= 2
+    ranked = calibrated_tags(conn, target)
+    by_raw = sorted(ranked, key=lambda r: -r[1])
+    assert by_raw[0][0] == "zz-noise-tag"          # raw ordering: noise wins
+    assert ranked[0][0] == "zz-signal-tag"         # z ordering: signal wins
+    assert ranked[0][2] > 2.0                      # strongly above its own baseline
+
+    # refresh is idempotent-replace (derived data)
+    assert refresh_calibration(conn) == n
