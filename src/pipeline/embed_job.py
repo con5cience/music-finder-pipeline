@@ -188,12 +188,18 @@ def _select_for_source(pending: list[tuple], source: str | None) -> list[tuple]:
     return chosen
 
 
-def _clips_for_track(path: str, platform: str, duration_s: int | None, workdir: Path, track_key: str) -> list:
+def _decode(path: str):
+    """Decode ONCE per track (ADR-015): every head consumes this waveform."""
+    data, sr = sf.read(path, dtype="float32", always_2d=True)
+    return data.mean(axis=1), sr
+
+
+def _clips_for_track(
+    mono, sr: int, path: str, platform: str, duration_s: int | None, workdir: Path, track_key: str
+) -> list:
     """(seg_start_s, seg_end_s, clip_path) per clip this track contributes."""
     if platform not in WINDOWED_PLATFORMS:
         return [(0, duration_s or _DEFAULT_SEGMENT_S, path)]
-    data, sr = sf.read(path, dtype="float32", always_2d=True)
-    mono = data.mean(axis=1)
     out = []
     for start_s, end_s in peak_windows(mono, sr, k=WINDOWS_PER_TRACK):
         clip_path = workdir / f"{track_key}-w{start_s}.wav"
@@ -211,6 +217,8 @@ def embed_artist_clips(
     *,
     fetch=fetch_audio,
     refresher=_default_refresher,
+    run_analysis: bool = True,
+    tag_scorer=None,
 ) -> int:
     """Embed all pending tracks for an artist and store stamped rows + centroid.
 
@@ -240,6 +248,7 @@ def embed_artist_clips(
     with tempfile.TemporaryDirectory(prefix="embed-") as tmp:
         workdir = Path(tmp)
         usable: list[tuple] = []  # (track_id, seg_start, seg_end, clip_path)
+        track_clip_paths: dict = {}  # track_id -> its window files (for the tag head)
         for tid, url, duration_s, platform, ptid, _release, _ri, _ti in selected:
             try:
                 path = fetch(url, workdir)
@@ -251,12 +260,27 @@ def embed_artist_clips(
                     path = fetch(fresh, workdir)
                 except AudioFetchError:
                     continue  # refreshed URL still broken — skip
-            for seg in _clips_for_track(path, platform, duration_s, workdir, str(tid)):
+            # decode ONCE when any head needs the waveform (analysis, windowing);
+            # preview tracks with analysis off embed their file untouched
+            needs_decode = run_analysis or platform in WINDOWED_PLATFORMS
+            mono, native_sr = _decode(path) if needs_decode else (None, None)
+            if run_analysis:
+                from pipeline.analysis import analyze_track, upsert_track_analysis
+
+                upsert_track_analysis(conn, tid, analyze_track(mono, native_sr))
+            for seg in _clips_for_track(mono, native_sr, path, platform, duration_s, workdir, str(tid)):
                 usable.append((tid, *seg))
+                track_clip_paths.setdefault(tid, []).append(seg[2])
         if not usable:
             return 0
         clips = [Clip(id=f"{tid}:{s}", artist_id=artist_id, path=path) for tid, s, _e, path in usable]
         vectors = embedder.embed(clips)
+
+        if tag_scorer is not None:
+            from pipeline.tags import upsert_track_tags
+
+            for tid, paths in track_clip_paths.items():
+                upsert_track_tags(conn, tid, tag_scorer.score_clips(artist_id, paths))
 
         for (tid, seg_start, seg_end, _path), vec in zip(usable, vectors, strict=True):
             conn.execute(

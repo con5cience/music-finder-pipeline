@@ -154,12 +154,24 @@ def _embedder():
     return get_embedder(settings.embedding_model, settings.effective_device)
 
 
+@functools.cache
+def _tag_scorer():
+    # Lazy per-process: MuLan + the 2,146-genre vocabulary embed once, then
+    # every artist's tag pass reuses the cached text matrix.
+    from pipeline.tags import MulanTagScorer, load_vocabulary
+
+    settings = Settings()
+    with psycopg.connect(settings.database_url) as conn:
+        vocab = load_vocabulary(conn)
+    return MulanTagScorer(vocab) if vocab else None
+
+
 def _embed_artist_sync(artist_id: str, source: str | None, ratio: float | None) -> int:
     from pipeline.embed_job import embed_artist_clips
 
     settings = Settings()
     with psycopg.connect(settings.database_url) as conn:
-        n = embed_artist_clips(conn, _embedder(), artist_id, source, ratio)
+        n = embed_artist_clips(conn, _embedder(), artist_id, source, ratio, tag_scorer=_tag_scorer())
         conn.commit()
     return n
 

@@ -27,6 +27,8 @@ EXPECTED_COLS = {
     "l_artist_url": 9,
     "link": 11,
     "link_type": 16,
+    "genre": 6,        # canonical tag vocabulary (Wave-1 analysis heads)
+    "genre_alias": 16,  # editor-curated merges: "synth punk" → "synth-punk"
 }
 
 # platform → (host match regex, platform_id capture regex), applied to url.url.

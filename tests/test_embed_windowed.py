@@ -81,6 +81,35 @@ def test_windowed_rerun_is_idempotent(conn, tmp_path):
     assert n2 == 0  # track has clips for this model → not pending
 
 
+def test_analysis_and_tag_heads_run_in_embed_pass(conn, tmp_path):
+    # decode-once integration: embedding an artist also writes track_analysis
+    # (CPU heads) and track_tag_scores (via the injected scorer).
+    class FakeScorer:
+        def score_clips(self, artist_id, clip_paths):
+            assert clip_paths  # window files exist on disk at scoring time
+            return [("zz-fake-genre", 0.42)]
+
+    a = _artist(conn)
+    _bc_track(conn, a, "zz-w-h1", _wav(tmp_path, "h1", 90), 90, "/album/x", 0)
+    n = embed_artist_clips(
+        conn, MockEmbedder(dim=8, name="mock-model"), a,
+        source="bandcamp", signal_ratio=0.33, tag_scorer=FakeScorer(),
+    )
+    assert n >= 2
+    analysis = conn.execute(
+        "SELECT ta.integrity, ta.tempo_bpm IS NOT NULL, ta.fingerprint IS NOT NULL "
+        "FROM track_analysis ta JOIN audio_track t ON t.id = ta.track_id WHERE t.artist_id = %s",
+        (a,),
+    ).fetchone()
+    assert analysis is not None and analysis[0] == "ok" and analysis[1] and analysis[2]
+    tags = conn.execute(
+        "SELECT tag, score FROM track_tag_scores tts JOIN audio_track t ON t.id = tts.track_id "
+        "WHERE t.artist_id = %s",
+        (a,),
+    ).fetchall()
+    assert tags == [("zz-fake-genre", 0.42)]
+
+
 def test_preview_platform_still_single_clip(conn, tmp_path):
     # regression: deezer path is untouched by windowing
     a = _artist(conn)
@@ -89,7 +118,10 @@ def test_preview_platform_still_single_clip(conn, tmp_path):
         "binding_tier, verification_status) VALUES (%s, 'deezer', 'zz-w-d1', '/audio/d1.mp3', 30, 'A', 'verified')",
         (a,),
     )
-    n = embed_artist_clips(conn, MockEmbedder(dim=8, name="mock-model"), a, source="deezer", signal_ratio=0.1)
+    n = embed_artist_clips(
+        conn, MockEmbedder(dim=8, name="mock-model"), a,
+        source="deezer", signal_ratio=0.1, run_analysis=False,  # fake path: mechanics only
+    )
     assert n == 1
     seg = conn.execute(
         "SELECT ce.segment_start_s, ce.segment_end_s FROM clip_embedding ce "

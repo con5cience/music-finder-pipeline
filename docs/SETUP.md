@@ -246,10 +246,11 @@ Steps (the periodic refresh repeats these with a newer dump):
 # 1. Find the latest export (published Wed + Sat)
 curl -s https://data.metabrainz.org/pub/musicbrainz/data/fullexport/LATEST
 # 2. Download both archives + MD5SUMS into ~/g/db-backups/ and verify md5sum
-# 3. Extract just the 8 tables (single pass per archive)
+# 3. Extract the 10 tables (single pass per archive)
 tar -xjf mbdump.tar.bz2 -C mbdump-extract \
   mbdump/artist mbdump/artist_alias mbdump/url mbdump/l_artist_url \
   mbdump/link mbdump/link_type
+tar -xjf mbdump.tar.bz2 -C mbdump-extract mbdump/genre mbdump/genre_alias  # tag vocabulary
 tar -xjf mbdump-derived.tar.bz2 -C mbdump-extract mbdump/artist_tag mbdump/tag
 # 4. Load + derive Tier-A identities (truncate-and-reload; ~3 min)
 uv run poe mb-bootstrap --dir ~/g/db-backups/mbdump-extract/mbdump

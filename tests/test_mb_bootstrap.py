@@ -110,6 +110,17 @@ def dump_dir(tmp_path: Path) -> Path:
     _w(d, "artist_alias", [
         ["500", str(A_BURIAL), alias, "\\N", "0", "\\N", "\\N", alias, *["\\N"] * 6, "f", "f"],
     ])
+    # genre: id gid name comment edits_pending last_updated (6)
+    _w(d, "genre", [
+        ["600", "ccccccc1-0000-0000-0000-000000000001", "synth-punk", "", "0", "\\N"],
+        ["601", "ccccccc1-0000-0000-0000-000000000002", "dubstep", "", "0", "\\N"],
+    ])
+    # genre_alias: id genre name locale edits_pending last_updated type sort_name
+    #              b_y b_m b_d e_y e_m e_d primary_for_locale ended (16)
+    _w(d, "genre_alias", [
+        ["700", "600", "synth punk", "en", "0", "\\N", "1", "synth punk", *["\\N"] * 6, "f", "f"],
+        ["701", "600", "synthpunk", "en", "0", "\\N", "1", "synthpunk", *["\\N"] * 6, "f", "f"],
+    ])
     return d
 
 
@@ -121,7 +132,8 @@ def loaded(conn, dump_dir):
 
 def test_load_row_counts(loaded):
     for table, n in [("artist", 4), ("url", 9), ("link_type", 6), ("link", 9),
-                     ("l_artist_url", 9), ("tag", 2), ("artist_tag", 2), ("artist_alias", 1)]:
+                     ("l_artist_url", 9), ("tag", 2), ("artist_tag", 2), ("artist_alias", 1),
+                     ("genre", 2), ("genre_alias", 2)]:
         assert loaded.execute(f"SELECT count(*) FROM mb_raw.{table}").fetchone()[0] == n, table
 
 
