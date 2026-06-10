@@ -15,6 +15,7 @@ from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
     from pipeline import activities
@@ -51,20 +52,26 @@ class IngestArtistWorkflow:
             return {"status": "unbound"}  # no audio-role identity; crawler binding is design-gated
 
         scanned = 0
-        for platform, _platform_id in plan["pending"]:
+        for platform, platform_id in plan["pending"]:
             discovery = DISCOVERY_ACTIVITIES.get(platform)
             if discovery is None:
                 continue  # no ingestion flow built for this source yet — stays pending
-            await workflow.execute_activity(
-                discovery,
-                inp.artist_id,
-                task_queue=queue_for(platform),
-                start_to_close_timeout=_DISCOVERY_TIMEOUT,
-                retry_policy=_IO_RETRY,
-            )
+            try:
+                await workflow.execute_activity(
+                    discovery,
+                    args=[inp.artist_id, platform_id],  # THIS identity, not an arbitrary one
+                    task_queue=queue_for(platform),
+                    start_to_close_timeout=_DISCOVERY_TIMEOUT,
+                    retry_policy=_IO_RETRY,
+                )
+            except ActivityError:
+                # Platform outage must not kill the cascade (review finding):
+                # leave this identity PENDING (no verdict — it re-qualifies)
+                # and fall through to the next source.
+                continue
             total_yield = await workflow.execute_activity(
                 activities.record_scan,
-                args=[inp.artist_id, platform, _platform_id],
+                args=[inp.artist_id, platform, platform_id],
                 start_to_close_timeout=_ACTIVITY_TIMEOUT,
             )
             scanned += 1

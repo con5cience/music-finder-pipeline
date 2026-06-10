@@ -102,6 +102,11 @@ def fetch_audio(url: str, workdir: Path) -> str:
             body = resp.read()
     except urllib.error.HTTPError as e:  # signed URLs expire → 403 (refreshable upstream)
         raise AudioFetchError(f"audio fetch HTTP {e.code}: {url[:120]}") from e
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        # DNS failures, refused connections, socket timeouts — same per-track
+        # isolation class as HTTP errors (review finding: these escaped and
+        # poisoned the whole artist batch).
+        raise AudioFetchError(f"audio fetch failed ({e}): {url[:120]}") from e
     ext = _audio_ext(body[:16])
     if ext is None:
         raise AudioFetchError(f"audio fetch returned non-audio ({body[:40]!r}): {url[:120]}")
@@ -142,7 +147,8 @@ def refresh_artist_centroid(
             dim = EXCLUDED.dim,
             embedding = EXCLUDED.embedding,
             clip_count = EXCLUDED.clip_count,
-            signal_ratio = EXCLUDED.signal_ratio,
+            -- None never wipes a recorded ratio (legacy sourceless calls)
+            signal_ratio = COALESCE(EXCLUDED.signal_ratio, artist_embedding.signal_ratio),
             computed_at = EXCLUDED.computed_at
         """,
         (signal_ratio, artist_id, model, source, source),
@@ -162,15 +168,17 @@ def _default_refresher(conn: Connection, platform: str, platform_track_id: str) 
     return None
 
 
-def _select_for_source(pending: list[tuple], source: str | None) -> list[tuple]:
-    """Full-track sources embed 3 tracks, newest across DISTINCT releases
-    (insert order = discography order = newest-first); <60s tracks only when
-    nothing longer exists. Preview sources embed everything pending."""
+def _select_for_source(pending: list[tuple], source: str | None, budget: int = TRACKS_PER_SOURCE) -> list[tuple]:
+    """Full-track sources embed up to `budget` tracks, newest across DISTINCT
+    releases (walk order from evidence — uuid pks make row order a lottery);
+    <60s tracks only when nothing longer exists. Preview sources embed
+    everything pending. `budget` already accounts for previously-embedded
+    tracks (review finding: re-runs must not grow past TRACKS_PER_SOURCE)."""
     if source not in WINDOWED_PLATFORMS:
         return pending
+    if budget <= 0:
+        return []
     eligible = [r for r in pending if (r[2] or 0) >= MIN_TRACK_S] or list(pending)
-    # newest-first by the discovery walk order recorded in evidence — NOT by
-    # row order (uuid pks make physical order a lottery)
     eligible.sort(key=lambda r: (r[6] is None, r[6], r[7] is None, r[7]))
     chosen: list[tuple] = []
     seen_releases: set = set()
@@ -178,14 +186,23 @@ def _select_for_source(pending: list[tuple], source: str | None) -> list[tuple]:
         if row[5] not in seen_releases:
             chosen.append(row)
             seen_releases.add(row[5])
-        if len(chosen) == TRACKS_PER_SOURCE:
+        if len(chosen) == budget:
             return chosen
     for row in eligible:  # pass 2: fill from anywhere
         if row not in chosen:
             chosen.append(row)
-            if len(chosen) == TRACKS_PER_SOURCE:
+            if len(chosen) == budget:
                 break
     return chosen
+
+
+def _embedded_track_count(conn: Connection, artist_id: str, model: str, source: str) -> int:
+    return conn.execute(
+        "SELECT count(DISTINCT ce.track_id) FROM clip_embedding ce "
+        "JOIN audio_track t ON t.id = ce.track_id "
+        "WHERE t.artist_id = %s AND t.platform = %s AND ce.model = %s",
+        (artist_id, source, model),
+    ).fetchone()[0]
 
 
 def _decode(path: str):
@@ -224,9 +241,19 @@ def embed_artist_clips(
 
     Per-track isolation: a failed download (signed URLs expire → 403) triggers
     one live URL refresh + retry; still-broken tracks are SKIPPED, never
-    poisoning the artist's batch — they stay pending for a later pass.
-    Returns the number of clips embedded (0 = clean no-op, centroid untouched).
+    poisoning the artist's batch — they stay pending for a later pass. If ALL
+    selected tracks fail, raises AudioFetchError so the failure is VISIBLE
+    (review finding: silently returning 0 let workflows complete 'embedded'
+    with no centroid). A sourceless call adopts artist.embedding_source when
+    set (review finding: legacy calls must not blend platforms or wipe the
+    signal_ratio). Returns the number of clips embedded.
     """
+    if source is None:
+        locked = conn.execute(
+            "SELECT embedding_source FROM artist WHERE id = %s", (artist_id,)
+        ).fetchone()
+        if locked and locked[0]:
+            source = locked[0]  # purity lock survives sourceless (legacy) calls
     pending = pending_tracks(conn, artist_id, embedder.name, source)
     if not pending:
         # Nothing NEW to embed — but a re-run must still converge metadata:
@@ -243,7 +270,14 @@ def embed_artist_clips(
                 conn.execute("UPDATE artist SET embedding_source = %s WHERE id = %s", (source, artist_id))
         return 0
 
-    selected = _select_for_source(pending, source)
+    budget = TRACKS_PER_SOURCE
+    if source in WINDOWED_PLATFORMS:
+        budget -= _embedded_track_count(conn, artist_id, embedder.name, source)
+    selected = _select_for_source(pending, source, budget)
+    if not selected:
+        # budget already spent on a prior run — converge metadata only
+        refresh_artist_centroid(conn, artist_id, embedder.name, source, signal_ratio)
+        return 0
     embedded = 0
     with tempfile.TemporaryDirectory(prefix="embed-") as tmp:
         workdir = Path(tmp)
@@ -272,7 +306,10 @@ def embed_artist_clips(
                 usable.append((tid, *seg))
                 track_clip_paths.setdefault(tid, []).append(seg[2])
         if not usable:
-            return 0
+            raise AudioFetchError(
+                f"all {len(selected)} selected tracks failed to fetch for artist {artist_id} "
+                f"(source={source}) — tracks remain pending"
+            )
         clips = [Clip(id=f"{tid}:{s}", artist_id=artist_id, path=path) for tid, s, _e, path in usable]
         vectors = embedder.embed(clips)
 

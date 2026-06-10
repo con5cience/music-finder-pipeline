@@ -33,15 +33,16 @@ def build_workers(client: Client, settings: Settings) -> list[Worker]:
             client,
             task_queue=settings.temporal_task_queue,
             workflows=[IngestArtistWorkflow],
-            # embed_artist stays registered here so embeds scheduled on this
-            # queue by pre-gpu-queue workflow runs still drain after upgrades.
+            # GPU work lives ONLY on the gpu queue (concurrency-capped). The
+            # legacy embed_artist registration here is gone: zero pre-cascade
+            # workflows remain in flight (verified before removal), and an
+            # uncapped queue must never run GPU activities (review finding).
             activities=[
                 activities.classify_page,
                 activities.bind_source,
                 activities.cascade_plan,
                 activities.record_scan,
                 activities.choose_embed_source,
-                activities.embed_artist,
             ],
         ),
         Worker(

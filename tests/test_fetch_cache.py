@@ -60,6 +60,19 @@ def test_404_is_negative_cached(conn, tmp_path: Path):
     assert len(f.calls) == 1  # dead pages are never re-crawled either
 
 
+def test_transient_4xx_raises_and_is_not_cached(conn, tmp_path: Path):
+    # 403/429 are rate-limit/auth transients: caching them would poison the
+    # URL forever (and terminal scan verdicts would lock the artist out).
+    for status in (401, 403, 429):
+        f = _fetcher(b"rate limited", status=status)
+        with pytest.raises(RuntimeError, match=str(status)):
+            cached_fetch(conn, "bandcamp", URL + f"?s{status}", fetcher=f, cache_dir=tmp_path)
+        n = conn.execute(
+            "SELECT count(*) FROM fetch_cache WHERE url = %s", (URL + f"?s{status}",)
+        ).fetchone()[0]
+        assert n == 0  # nothing cached — a later attempt refetches
+
+
 def test_5xx_raises_and_is_not_cached(conn, tmp_path: Path):
     f = _fetcher(b"upstream sad", status=503)
     with pytest.raises(RuntimeError, match="503"):

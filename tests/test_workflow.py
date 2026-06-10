@@ -49,8 +49,14 @@ async def mock_embed(artist_id: str, source: str | None = None, ratio: float | N
 
 
 @activity.defn(name="discover_deezer_tracks")
-async def mock_discover(artist_id: str) -> int:
+async def mock_discover(artist_id: str, platform_id: str | None = None) -> int:
+    assert platform_id is not None  # the cascade must name WHICH identity (review finding)
     return 12
+
+
+@activity.defn(name="discover_deezer_tracks")
+async def mock_discover_failing(artist_id: str, platform_id: str | None = None) -> int:
+    raise RuntimeError("platform outage")
 
 
 async def _env() -> WorkflowEnvironment:
@@ -114,6 +120,31 @@ async def test_nothing_usable_is_no_signal():
     async with env:
         res = await _run(env, _mock_plan([["deezer", "d1"]]), _mock_record_scan(0), _mock_choose(None))
     assert res["status"] == "no_signal"
+
+
+async def test_discovery_outage_falls_through_not_fatal():
+    # Review finding: a persistently-failing discovery killed the whole
+    # workflow. It must skip the platform (no verdict — stays pending) and
+    # continue the cascade.
+    env = await _env()
+    calls: list = []
+    async with env:
+        tq = "test-" + uuid.uuid4().hex
+        async with (
+            Worker(env.client, task_queue=tq, workflows=[IngestArtistWorkflow],
+                   activities=[_mock_plan([["deezer", "d1"]]), _mock_record_scan(0, calls),
+                               _mock_choose(None), mock_embed]),
+            Worker(env.client, task_queue="deezer-io", activities=[mock_discover_failing]),
+            Worker(env.client, task_queue="gpu", activities=[mock_embed]),
+        ):
+            res = await env.client.execute_workflow(
+                IngestArtistWorkflow.run,
+                IngestArtistInput("a1"),
+                id="wf-" + uuid.uuid4().hex,
+                task_queue=tq,
+            )
+    assert res["status"] == "no_signal"  # workflow survived the outage
+    assert calls == []  # no verdict written for the failed platform — stays pending
 
 
 async def test_platform_without_flow_is_skipped_not_fatal():

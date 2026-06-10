@@ -163,6 +163,30 @@ def test_rerun_with_no_new_clips_still_converges_metadata(conn):
     assert (src, float(ratio)) == ("deezer", 0.2)  # ...but metadata converged
 
 
+def test_legacy_sourceless_call_respects_locked_source(conn, tmp_path):
+    # Review finding (top severity): a legacy embed call with source=None
+    # blended all platforms and NULLed signal_ratio. With embedding_source
+    # locked, a sourceless call must adopt the lock and preserve the ratio.
+    a = _artist(conn)
+    _tracks(conn, a, "bandcamp", 1, "zz-cas-lk", tmp_path)
+    emb = MockEmbedder(dim=8, name="mock-model")
+    embed_artist_clips(conn, emb, a, source="bandcamp", signal_ratio=0.33)
+    _tracks(conn, a, "deezer", 2, "zz-cas-lkd")  # new pending deezer tracks
+
+    n = embed_artist_clips(conn, emb, a)  # legacy: no source, no ratio
+    assert n == 0  # deezer tracks NOT embedded — lock adopted, purity holds
+    src, ratio, dz_clips = conn.execute(
+        "SELECT a.embedding_source, ae.signal_ratio, "
+        "  (SELECT count(*) FROM clip_embedding ce JOIN audio_track t ON t.id = ce.track_id "
+        "   WHERE t.artist_id = a.id AND t.platform = 'deezer') "
+        "FROM artist a JOIN artist_embedding ae ON ae.artist_id = a.id WHERE a.id = %s",
+        (a,),
+    ).fetchone()
+    assert src == "bandcamp"
+    assert abs(float(ratio) - 0.33) < 1e-6  # ratio survives the sourceless call
+    assert dz_clips == 0
+
+
 def test_supersede_flips_centroid_wholesale(conn, tmp_path):
     # deezer embeds first (thin); bandcamp supersedes — centroid must rebuild
     # from bandcamp clips only and embedding_source must flip.

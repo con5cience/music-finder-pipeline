@@ -75,7 +75,11 @@ def cached_fetch(
         return CachedResponse(status, body, content_type, from_cache=True)
 
     status, content_type, body = (fetcher or _http_get)(url)
-    if status >= 500:
+    if not (200 <= status < 300 or status == 404):
+        # Only 2xx and 404 (negative cache: dead is dead) are cacheable.
+        # Everything else — 5xx, 403/429 rate-limits, auth walls — is
+        # transient: caching it would poison the URL permanently, and a
+        # terminal scan verdict on a poisoned read locks the artist out.
         raise RuntimeError(f"fetch failed upstream ({status}) for {url}")
 
     content_hash = hashlib.sha256(body).hexdigest()

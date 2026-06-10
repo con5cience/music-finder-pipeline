@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from functools import partial
+from pathlib import Path
 
 from pipeline.bench.mock import MockEmbedder
 from pipeline.embed_job import _audio_ext, pending_tracks
@@ -152,6 +153,37 @@ def test_expired_url_refreshes_and_embeds(conn):
     n = embed_artist_clips(conn, _embedder(), a, fetch=fake_fetch, refresher=refresher)
     assert n == 1
     assert refreshed == [("deezer", "t1")]
+
+
+def test_urlerror_becomes_audiofetcherror():
+    # Review finding: only HTTPError was converted; URLError/timeouts escaped
+    # the per-track isolation. 127.0.0.1:1 refuses instantly → URLError.
+    import pytest
+
+    from pipeline.embed_job import AudioFetchError, fetch_audio
+
+    with pytest.raises(AudioFetchError):
+        fetch_audio("http://127.0.0.1:1/nope.mp3", Path("/tmp"))
+
+
+def test_all_selected_tracks_failing_raises_not_silent_success(conn):
+    # Review finding: total fetch failure returned 0 → workflow completed
+    # status='embedded' with no centroid. Must raise so Temporal retries and
+    # failure is VISIBLE; tracks stay pending either way.
+    import pytest
+
+    from pipeline.embed_job import AudioFetchError
+
+    a = _artist(conn, "A")
+    _track(conn, a, "t1", "/expired/t1.mp3")
+    _track(conn, a, "t2", "/expired/t2.mp3")
+
+    def dead_fetch(url, workdir):
+        raise AudioFetchError("audio fetch HTTP 403")
+
+    with pytest.raises(AudioFetchError, match="all 2 selected"):
+        embed_artist_clips(conn, _embedder(), a, fetch=dead_fetch, refresher=lambda *a_: None)
+    assert len(pending_tracks(conn, a, "mock-model")) == 2  # still pending
 
 
 def test_unrefreshable_track_is_skipped_not_poisonous(conn):

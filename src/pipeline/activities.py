@@ -99,50 +99,57 @@ async def choose_embed_source(artist_id: str) -> dict | None:
     return await asyncio.to_thread(_choose_embed_source_sync, artist_id)
 
 
-def _discover_deezer_sync(artist_id: str) -> int:
+def _resolve_platform_id(conn, platform: str, artist_id: str, platform_id: str | None) -> str | None:
+    """Use the cascade-supplied identity; fall back to lookup only for legacy
+    calls. Review finding: fetchone()-an-arbitrary-identity scanned the wrong
+    subdomain for artists with 2+ identities on one platform."""
+    if platform_id is not None:
+        return platform_id
+    row = conn.execute(
+        "SELECT platform_id FROM platform_identity WHERE platform = %s AND artist_id = %s",
+        (platform, artist_id),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _discover_deezer_sync(artist_id: str, platform_id: str | None) -> int:
     from pipeline.sources.deezer import discover_deezer
 
     settings = Settings()
     with psycopg.connect(settings.database_url) as conn:
-        row = conn.execute(
-            "SELECT platform_id FROM platform_identity WHERE platform = 'deezer' AND artist_id = %s",
-            (artist_id,),
-        ).fetchone()
-        if row is None:
+        pid = _resolve_platform_id(conn, "deezer", artist_id, platform_id)
+        if pid is None:
             return 0
-        n = discover_deezer(conn, artist_id, row[0])
+        n = discover_deezer(conn, artist_id, pid)
         conn.commit()
     return n
 
 
 @activity.defn
-async def discover_deezer_tracks(artist_id: str) -> int:
-    """Discover Deezer preview tracks for a bound artist (runs on deezer-io,
-    rate-capped server-side). Returns new audio_track rows written."""
-    return await asyncio.to_thread(_discover_deezer_sync, artist_id)
+async def discover_deezer_tracks(artist_id: str, platform_id: str | None = None) -> int:
+    """Discover Deezer preview tracks for ONE bound identity (runs on
+    deezer-io, rate-capped server-side). Returns new audio_track rows."""
+    return await asyncio.to_thread(_discover_deezer_sync, artist_id, platform_id)
 
 
-def _discover_bandcamp_sync(artist_id: str) -> int:
+def _discover_bandcamp_sync(artist_id: str, platform_id: str | None) -> int:
     from pipeline.sources.bandcamp import discover_bandcamp
 
     settings = Settings()
     with psycopg.connect(settings.database_url) as conn:
-        row = conn.execute(
-            "SELECT platform_id FROM platform_identity WHERE platform = 'bandcamp' AND artist_id = %s",
-            (artist_id,),
-        ).fetchone()
-        if row is None:
+        pid = _resolve_platform_id(conn, "bandcamp", artist_id, platform_id)
+        if pid is None:
             return 0
-        n = discover_bandcamp(conn, artist_id, row[0])
+        n = discover_bandcamp(conn, artist_id, pid)
         conn.commit()
     return n
 
 
 @activity.defn
-async def discover_bandcamp_tracks(artist_id: str) -> int:
-    """Walk the artist's Bandcamp discography (rate-capped on bandcamp-io);
+async def discover_bandcamp_tracks(artist_id: str, platform_id: str | None = None) -> int:
+    """Walk ONE Bandcamp identity's discography (rate-capped on bandcamp-io);
     store ALL streamable tracks. Returns new audio_track rows written."""
-    return await asyncio.to_thread(_discover_bandcamp_sync, artist_id)
+    return await asyncio.to_thread(_discover_bandcamp_sync, artist_id, platform_id)
 
 
 @functools.cache

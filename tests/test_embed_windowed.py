@@ -71,6 +71,29 @@ def test_windowed_embed_selects_and_segments(conn, tmp_path):
     assert all(2 <= c <= 4 for c in per_track.values())
 
 
+def test_rerun_respects_track_budget(conn, tmp_path):
+    # Review finding: re-runs embedded 3 MORE pending tracks each time. The
+    # budget must count tracks ALREADY embedded for this (source, model).
+    a = _artist(conn)
+    for i in range(5):
+        _bc_track(conn, a, f"zz-w-b{i}", _wav(tmp_path, f"b{i}", 90), 90, f"/album/r{i}", i)
+    emb = MockEmbedder(dim=8, name="mock-model")
+    n1 = embed_artist_clips(conn, emb, a, source="bandcamp", signal_ratio=1.0)
+    assert n1 > 0
+    tracks_after_1 = conn.execute(
+        "SELECT count(DISTINCT ce.track_id) FROM clip_embedding ce "
+        "JOIN audio_track t ON t.id = ce.track_id WHERE t.artist_id = %s", (a,)
+    ).fetchone()[0]
+    assert tracks_after_1 == 3  # the budget
+    n2 = embed_artist_clips(conn, emb, a, source="bandcamp", signal_ratio=1.0)
+    assert n2 == 0  # budget already spent — re-run embeds NOTHING more
+    tracks_after_2 = conn.execute(
+        "SELECT count(DISTINCT ce.track_id) FROM clip_embedding ce "
+        "JOIN audio_track t ON t.id = ce.track_id WHERE t.artist_id = %s", (a,)
+    ).fetchone()[0]
+    assert tracks_after_2 == 3
+
+
 def test_windowed_rerun_is_idempotent(conn, tmp_path):
     a = _artist(conn)
     _bc_track(conn, a, "zz-w-r1", _wav(tmp_path, "r1", 90), 90, "/album/x", 0)
