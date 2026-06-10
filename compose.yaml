@@ -90,7 +90,11 @@ services:
       PIPELINE_TEMPORAL_ADDRESS: temporal:7233
       PIPELINE_FETCH_CACHE_DIR: /cache/fetch-cache
       HF_HOME: /hf
-      PIPELINE_GPU_CONCURRENCY: "4"  # fp16 autocast halves activations
+      PIPELINE_GPU_CONCURRENCY: "3"  # proven ceiling (13.1GB peak). conc-4
+      # REQUIRES true fp16 (model.half()) — autocast BACKFIRED live (it
+      # caches fp16 weight copies per forward: fp32 + cache > fp32 alone;
+      # 6 OOMs in 8 min). half() is a maintenance-window experiment.
+      PIPELINE_FP16: "0"
     volumes:
       - fetch-cache:/cache/fetch-cache
       - hf-cache:/hf
