@@ -110,6 +110,12 @@ def prep_artist(
             conn=conn, track_id=tid, artist_id=artist_id, platform=platform,
             mono=mono, sr=sr,
         ))
+        try:  # fingerprint rides the already-paid decode; never blocks staging
+            from pipeline.fingerprint import store_fingerprint
+
+            store_fingerprint(conn, tid, mono, sr)
+        except Exception:  # noqa: BLE001 — flag-only feature, prep must not fail on it
+            pass
         segs = _clips_for_track(mono, sr, path, platform, duration_s, adir, str(tid))
         manifest.append({
             "track_id": str(tid),
