@@ -66,7 +66,7 @@ def publishable_artists(conn: Connection, limit: int) -> list[tuple]:
     return conn.execute(
         """
         SELECT a.id, a.mbid::text, a.display_name, a.embedding_source,
-               ae.embedding::text, ae.model
+               ae.embedding::text, ae.model, ae.signal_ratio
         FROM artist a
         JOIN artist_embedding ae ON ae.artist_id = a.id
         WHERE a.embedding_source IS NOT NULL AND a.mbid IS NOT NULL
@@ -74,6 +74,23 @@ def publishable_artists(conn: Connection, limit: int) -> list[tuple]:
         """,
         (limit,),
     ).fetchall()
+
+
+def artist_perceptual(conn: Connection, artist_id) -> dict | None:
+    """Wave-2 axis means over the artist's tracks (the scorer's wₚ input)."""
+    row = conn.execute(
+        """
+        SELECT avg(danceability), avg(valence), avg(arousal),
+               avg(speechiness), avg(liveness), avg(vocalness)
+        FROM track_perceptual tp JOIN audio_track t ON t.id = tp.track_id
+        WHERE t.artist_id = %s
+        """,
+        (artist_id,),
+    ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    keys = ("danceability", "valence", "arousal", "speechiness", "liveness", "vocalness")
+    return {k: round(float(v), 4) for k, v in zip(keys, row, strict=True)}
 
 
 def artist_urls(conn: Connection, artist_id) -> dict[str, str]:
@@ -138,24 +155,30 @@ def publish_artists(factory: Connection, app: Connection, limit: int = 1000) -> 
     import json
 
     published = 0
-    for aid, mbid, name, _source, embedding, _model in publishable_artists(factory, limit):
+    for aid, mbid, name, source, embedding, _model, ratio in publishable_artists(factory, limit):
         urls = artist_urls(factory, aid)
         tags = artist_tags(factory, aid)
+        perceptual = artist_perceptual(factory, aid)
         url_cols = "".join(f", {c} = %s" for c in urls)
         app.execute(
             f"""
             INSERT INTO artists (id, mbid, name, slug, tags, audio_embedding,
+                                 signal_ratio, embedding_source, perceptual,
                                  audio_embedding_updated, created_at
                                  {"".join("," + c for c in urls)})
-            VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, now(), now()
+            VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s, now(), now()
                     {", %s" * len(urls)})
             ON CONFLICT (mbid) DO UPDATE SET
                 name = EXCLUDED.name, slug = EXCLUDED.slug, tags = EXCLUDED.tags,
                 audio_embedding = EXCLUDED.audio_embedding,
+                signal_ratio = EXCLUDED.signal_ratio,
+                embedding_source = EXCLUDED.embedding_source,
+                perceptual = EXCLUDED.perceptual,
                 audio_embedding_updated = now()
                 {url_cols}
             """,
             (mbid, name, resolve_slug(app, name, mbid), json.dumps(tags), embedding,
+             ratio, source, json.dumps(perceptual) if perceptual else None,
              *urls.values(), *urls.values()),
         )
         published += 1

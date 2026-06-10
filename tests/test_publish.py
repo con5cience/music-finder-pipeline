@@ -21,6 +21,9 @@ def _serving_schema(conn):
             slug text,
             tags jsonb,
             audio_embedding text,
+            signal_ratio real,
+            embedding_source text,
+            perceptual jsonb,
             audio_embedding_updated timestamptz,
             created_at timestamptz,
             deezer_url text, bandcamp_url text, soundcloud_url text,
@@ -41,8 +44,8 @@ def _factory_artist(conn) -> str:
         (a, a),
     )
     conn.execute(
-        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count) "
-        "VALUES (%s, 'mock-model', 2, '[0.6,0.8]', 4)", (a,),
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
+        "VALUES (%s, 'mock-model', 2, '[0.6,0.8]', 4, 0.67)", (a,),
     )
     t = conn.execute(
         "INSERT INTO audio_track (artist_id, platform, platform_track_id, audio_url, duration_s, "
@@ -85,14 +88,16 @@ def test_publish_upserts_and_is_idempotent(conn):
     a = _factory_artist(conn)
     _serving_schema(conn)
     assert publish_artists(conn, conn, limit=10_000_000) >= 1
-    row = conn.execute("SELECT name, slug, tags, audio_embedding, bandcamp_url "
-                       "FROM artists WHERE mbid = %s", (MBID,)).fetchone()
+    row = conn.execute("SELECT name, slug, tags, audio_embedding, bandcamp_url, "
+                       "signal_ratio, embedding_source FROM artists WHERE mbid = %s", (MBID,)).fetchone()
     assert row[0] == "Püblish Fixture"
     assert row[1] == "publish-fixture"
     tags = row[2] if isinstance(row[2], dict) else json.loads(row[2])
     assert "zz-pub-genre" in tags and all(isinstance(v, int) and v >= 1 for v in tags.values())
     assert row[3] == "[0.6,0.8]"
     assert row[4] == "https://zz-pub-band.bandcamp.com"
+    assert abs(row[5] - 0.67) < 1e-6        # signal_ratio carried (9b)
+    assert row[6] == "bandcamp"             # embedding_source carried (9b)
 
     # idempotent re-publish: same row updated, not duplicated
     conn.execute("UPDATE artist SET display_name = 'Renamed Fixture' WHERE id = %s", (a,))
