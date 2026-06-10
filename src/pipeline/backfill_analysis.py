@@ -77,7 +77,7 @@ def backfill_tracks(
             mono, sr = _decode(path)
             upsert_track_analysis(conn, tid, analyze_track(mono, sr))
             if tag_scorer is not None:
-                from pipeline.tags import upsert_track_tags
+                from pipeline.tags import replace_track_tags
 
                 if platform in WINDOWED_PLATFORMS:
                     import soundfile as sf
@@ -89,7 +89,7 @@ def backfill_tracks(
                         paths.append(str(p))
                 else:
                     paths = [path]
-                upsert_track_tags(conn, tid, tag_scorer.score_clips(owner_id, paths))
+                replace_track_tags(conn, tid, tag_scorer.score_clips(owner_id, paths))
             done += 1
     return done, skipped
 
@@ -103,15 +103,24 @@ def main() -> None:
     from pipeline.tags import MulanTagScorer, load_vocabulary
 
     ap = argparse.ArgumentParser(description="backfill Wave-1 analysis over embedded tracks")
-    ap.add_argument("--limit", type=int, default=100)
+    ap.add_argument("--limit", type=int, default=100, help="total tracks this run")
+    ap.add_argument("--batch", type=int, default=25, help="tracks per transaction")
     ap.add_argument("--no-tags", action="store_true", help="CPU heads only (skip MuLan)")
     args = ap.parse_args()
 
     with psycopg.connect(Settings().database_url) as conn:
         scorer = None if args.no_tags else MulanTagScorer(load_vocabulary(conn))
-        done, skipped = backfill_tracks(conn, args.limit, tag_scorer=scorer)
-        conn.commit()
-    print(f"analyzed={done} skipped={skipped}")
+        total_done = total_skipped = 0
+        while total_done + total_skipped < args.limit:
+            batch = min(args.batch, args.limit - total_done - total_skipped)
+            done, skipped = backfill_tracks(conn, batch, tag_scorer=scorer)
+            conn.commit()  # per-batch: a crash loses at most one batch, not the run
+            total_done += done
+            total_skipped += skipped
+            print(f"batch done={done} skipped={skipped} (total {total_done}/{total_skipped})", flush=True)
+            if done == 0:
+                break  # nothing analyzable left (skipped tracks would just repeat)
+    print(f"analyzed={total_done} skipped={total_skipped}", flush=True)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from pipeline.analysis import analyze_track, detect_key, fingerprint_pcm, integrity_check, upsert_track_analysis
-from pipeline.tags import load_alias_map, load_vocabulary, upsert_track_tags
+from pipeline.tags import load_alias_map, load_vocabulary, replace_track_tags
 
 SR = 22050
 
@@ -162,6 +162,32 @@ def test_vocabulary_and_alias_merge(conn, synthetic_vocab):
     assert aliases["zztestgenre"] == "zz-test-genre"
 
 
+def test_tag_scorer_does_not_memoize_failure(monkeypatch):
+    # Review finding: functools.cache memoized None when the vocabulary was
+    # empty at first call, silently disabling tags for the process lifetime.
+    import pipeline.activities as acts
+    import pipeline.tags as tags_mod
+
+    monkeypatch.setattr(acts, "_tag_scorer_memo", [])
+    calls = {"n": 0}
+
+    def fake_vocab(conn):
+        calls["n"] += 1
+        return [] if calls["n"] == 1 else ["zz-genre"]
+
+    class FakeScorer:
+        def __init__(self, vocab):
+            self.vocabulary = vocab
+
+    monkeypatch.setattr(tags_mod, "load_vocabulary", fake_vocab)
+    monkeypatch.setattr(tags_mod, "MulanTagScorer", FakeScorer)
+
+    assert acts._tag_scorer() is None          # empty vocab → None, NOT cached
+    scorer = acts._tag_scorer()                # vocabulary arrived → recovers
+    assert scorer is not None and scorer.vocabulary == ["zz-genre"]
+    assert acts._tag_scorer() is scorer        # success IS memoized
+
+
 def test_backfill_analyzes_embedded_tracks_idempotently(conn, tmp_path):
     import json
 
@@ -217,10 +243,12 @@ def test_track_tag_upsert_roundtrip(conn):
         "RETURNING id",
         (a,),
     ).fetchone()[0]
-    upsert_track_tags(conn, t, [("dubstep", 0.31), ("uk garage", 0.27)])
-    upsert_track_tags(conn, t, [("dubstep", 0.33)])  # update wins
+    replace_track_tags(conn, t, [("dubstep", 0.31), ("uk garage", 0.27)])
+    # Review finding: re-scoring must REPLACE, not accumulate — stale tags
+    # from a prior run would pollute the per-tag calibration distributions.
+    replace_track_tags(conn, t, [("dubstep", 0.33), ("2-step", 0.29)])
     rows = dict(
         conn.execute("SELECT tag, score FROM track_tag_scores WHERE track_id = %s", (t,)).fetchall()
     )
+    assert set(rows) == {"dubstep", "2-step"}  # 'uk garage' gone, not lingering
     assert abs(rows["dubstep"] - 0.33) < 1e-6
-    assert abs(rows["uk garage"] - 0.27) < 1e-6

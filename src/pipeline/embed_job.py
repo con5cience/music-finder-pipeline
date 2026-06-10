@@ -314,10 +314,10 @@ def embed_artist_clips(
         vectors = embedder.embed(clips)
 
         if tag_scorer is not None:
-            from pipeline.tags import upsert_track_tags
+            from pipeline.tags import replace_track_tags
 
             for tid, paths in track_clip_paths.items():
-                upsert_track_tags(conn, tid, tag_scorer.score_clips(artist_id, paths))
+                replace_track_tags(conn, tid, tag_scorer.score_clips(artist_id, paths))
 
         for (tid, seg_start, seg_end, _path), vec in zip(usable, vectors, strict=True):
             conn.execute(

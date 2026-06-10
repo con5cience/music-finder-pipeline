@@ -75,13 +75,18 @@ def default_scorer_vocab_key() -> None:  # placeholder for future multi-vocab ve
     return None
 
 
-def upsert_track_tags(conn: Connection, track_id, tag_scores: list[tuple[str, float]]) -> None:
-    for tag, score in tag_scores:
-        conn.execute(
-            """
-            INSERT INTO track_tag_scores (track_id, tag, score, model)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (track_id, tag, model) DO UPDATE SET score = EXCLUDED.score, computed_at = now()
-            """,
-            (track_id, tag, score, TAG_MODEL),
+def replace_track_tags(conn: Connection, track_id, tag_scores: list[tuple[str, float]]) -> None:
+    """Replace the track's tag set wholesale (review finding: upserting only
+    the new top-K left stale rows from prior scoring runs, polluting per-tag
+    calibration distributions). One DELETE + one batched INSERT (review
+    finding: per-tag round-trips were ~30M avoidable statements at scale)."""
+    conn.execute(
+        "DELETE FROM track_tag_scores WHERE track_id = %s AND model = %s", (track_id, TAG_MODEL)
+    )
+    if not tag_scores:
+        return
+    with conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO track_tag_scores (track_id, tag, score, model) VALUES (%s, %s, %s, %s)",
+            [(track_id, tag, score, TAG_MODEL) for tag, score in tag_scores],
         )

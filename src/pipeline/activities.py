@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import logging
 
 import psycopg
 from temporalio import activity
@@ -161,16 +162,31 @@ def _embedder():
     return get_embedder(settings.embedding_model, settings.effective_device)
 
 
-@functools.cache
+_tag_scorer_memo: list = []  # [MulanTagScorer] once successfully built
+
+
 def _tag_scorer():
-    # Lazy per-process: MuLan + the 2,146-genre vocabulary embed once, then
-    # every artist's tag pass reuses the cached text matrix.
+    """Lazy per-process scorer; the vocabulary matrix embeds once and is
+    reused. Deliberately NOT functools.cache: an empty vocabulary (worker
+    started before the genre tables were loaded) must not be memoized as
+    None forever — we warn loudly and re-check on the next artist (review
+    finding: tags were silently disabled for the process lifetime)."""
+    if _tag_scorer_memo:
+        return _tag_scorer_memo[0]
     from pipeline.tags import MulanTagScorer, load_vocabulary
 
     settings = Settings()
     with psycopg.connect(settings.database_url) as conn:
         vocab = load_vocabulary(conn)
-    return MulanTagScorer(vocab) if vocab else None
+    if not vocab:
+        logging.getLogger(__name__).warning(
+            "tag vocabulary empty (mb_raw.genre) — tag head SKIPPED for this artist; "
+            "load the genre tables (poe mb-bootstrap) to enable tags"
+        )
+        return None  # not memoized — recovers as soon as the vocabulary exists
+    scorer = MulanTagScorer(vocab)
+    _tag_scorer_memo.append(scorer)
+    return scorer
 
 
 def _embed_artist_sync(artist_id: str, source: str | None, ratio: float | None) -> int:
