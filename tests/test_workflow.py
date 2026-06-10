@@ -148,7 +148,10 @@ async def test_discovery_outage_falls_through_not_fatal():
 
 
 async def test_platform_without_flow_is_skipped_not_fatal():
-    # youtube has no discovery activity yet: identity stays pending, the
+    # tidal is PERMANENTLY flow-less (playback asset, audio_priority None —
+    # never gains discovery). Third platform this test has used: bandcamp
+    # then soundcloud then youtube each gained flows and hung it (dispatch
+    # to an unpolled queue). Tidal ends the migration for good.
     # cascade moves on, and choose still runs (an earlier-scanned source or
     # nothing may win). NB: must use a genuinely flow-less platform — this
     # test hung for 30 minutes when bandcamp gained a flow and the dispatch
@@ -158,9 +161,9 @@ async def test_platform_without_flow_is_skipped_not_fatal():
     async with env:
         res = await _run(
             env,
-            _mock_plan([["youtube", "y1"], ["deezer", "d1"]]),
+            _mock_plan([["tidal", "t1"], ["deezer", "d1"]]),
             _mock_record_scan(12, calls),
             _mock_choose({"source": "deezer", "ratio": 1.2}),
         )
     assert res["status"] == "embedded"
-    assert calls == ["deezer"]  # youtube never scanned (no flow), deezer was
+    assert calls == ["deezer"]  # tidal never scanned (no flow), deezer was
