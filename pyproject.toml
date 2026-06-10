@@ -80,6 +80,7 @@ fetch-clips = "python -m pipeline.bench.fetch_clips --file seeds/benchmark-artis
 mb-bootstrap = "python -m pipeline.mb_bootstrap"   # usage: uv run poe mb-bootstrap --dir ~/g/db-backups/mbdump-extract/mbdump
 analysis-backfill = "python -m pipeline.backfill_analysis"   # Wave-1 heads over already-embedded tracks
 search-bind = "python -m pipeline.search_bind"   # 3d B-tier binding over unbound artists
+search-rescore = "python -c \"import psycopg; from pipeline.config import Settings; from pipeline.search_bind import rescore_none_verdicts; c = psycopg.connect(Settings().database_url); print(rescore_none_verdicts(c)); c.commit()\""   # v2 re-pass over none verdicts (cache-backed, free)
 review-poll = "python -m pipeline.review_poller"   # apply admin-approved Tier-C bindings
 factory-status = "python -m pipeline.factory_status"   # live activity snapshot (--watch for loop)
 tag-calibrate = "python -m pipeline.tag_calibration"   # refresh per-tag z-score moments

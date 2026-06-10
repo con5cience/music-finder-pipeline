@@ -173,3 +173,84 @@ def test_searcher_error_skips_without_verdict(conn):
     assert conn.execute(
         "SELECT count(*) FROM search_attempt WHERE artist_id = %s", (a,)
     ).fetchone()[0] == 0  # no verdict ledgered → retryable
+
+
+# ---- 3d v2: the typo tier (mined from the old fleet's proven scoring) -------
+
+
+def test_typo_tier_binds_unique_single_edit(conn):
+    # 'Slowdive' vs candidate 'Slowdiv' (one deletion) — unique fuzzy → B
+    from pipeline.search_bind import bind_artist_on_platform
+
+    a = _artist(conn, name="Slowdive", mbid="00000000-feed-4bad-9bad-000000000894")
+    v = bind_artist_on_platform(
+        conn, str(a), "Slowdive", "deezer",
+        searcher=_searcher([{"name": "Slowdiv", "platform_id": "990095", "popularity": 10}]),
+    )
+    assert v == "bound"
+    ev = conn.execute(
+        "SELECT binding_evidence FROM platform_identity WHERE artist_id = %s", (a,)
+    ).fetchone()[0]
+    assert ev["method"] == "search_typo1"  # fuzzy binds are MARKED in evidence
+
+
+def test_typo_tier_never_containment(conn):
+    # the 'Beat' vs 'Beatles' hazard: big length diff is NEVER a match
+    from pipeline.search_bind import bind_artist_on_platform
+
+    a = _artist(conn, name="Beat", mbid="00000000-feed-4bad-9bad-000000000895")
+    v = bind_artist_on_platform(
+        conn, str(a), "Beat", "soundcloud",
+        searcher=_searcher([{"name": "Beatles", "platform_id": "zz-btl", "popularity": 9999}]),
+    )
+    assert v == "none"
+
+
+def test_typo_tier_exact_still_wins_over_fuzzy(conn):
+    from pipeline.search_bind import bind_artist_on_platform
+
+    a = _artist(conn, name="Lowly", mbid="00000000-feed-4bad-9bad-000000000896")
+    v = bind_artist_on_platform(
+        conn, str(a), "Lowly", "deezer",
+        searcher=_searcher([
+            {"name": "Lowly", "platform_id": "990096", "popularity": 5},
+            {"name": "Lowlly", "platform_id": "990097", "popularity": 50},
+        ]),
+    )
+    assert v == "bound"
+    pid = conn.execute(
+        "SELECT platform_id FROM platform_identity WHERE artist_id = %s", (a,)
+    ).fetchone()[0]
+    assert pid == "990096"  # the exact match, not the popular typo
+
+
+def test_typo_tier_multiple_fuzzy_goes_to_review(conn):
+    from pipeline.search_bind import bind_artist_on_platform
+
+    a = _artist(conn, name="Mist", mbid="00000000-feed-4bad-9bad-000000000897")
+    v = bind_artist_on_platform(
+        conn, str(a), "Mist", "deezer",
+        searcher=_searcher([
+            {"name": "Misty", "platform_id": "990098", "popularity": 5},
+            {"name": "Mists", "platform_id": "990099", "popularity": 3},
+        ]),
+    )
+    assert v == "review"
+
+
+def test_rescore_upgrades_none_verdicts(conn):
+    # v2's re-pass: 'none' ledger rows re-evaluated (cached responses → free);
+    # a typo candidate that v1 ignored now binds, and the ledger upgrades.
+    from pipeline.search_bind import bind_artist_on_platform, rescore_none_verdicts
+
+    a = _artist(conn, name="Hexvoid", mbid="00000000-feed-4bad-9bad-000000000898")
+    cands = [{"name": "Hexvoidd", "platform_id": "zz-hex", "popularity": 2}]
+    v1 = bind_artist_on_platform(conn, str(a), "Hexvoid", "bandcamp",
+                                 searcher=_searcher(cands), fuzzy=False)
+    assert v1 == "none"
+    n = rescore_none_verdicts(conn, limit=10, searcher_override=_searcher(cands))
+    assert n >= 1
+    verdict = conn.execute(
+        "SELECT verdict FROM search_attempt WHERE artist_id = %s AND platform = 'bandcamp'", (a,)
+    ).fetchone()[0]
+    assert verdict == "bound"

@@ -8,7 +8,13 @@ was born):
       → Tier-B platform_identity (scan_status pending → cascade picks it up)
   MULTIPLE exact candidates ("Tomasito" has three bandcamp accounts)
       → review_item kind 'source_binding' with all candidates (admin decides)
-  ZERO exact candidates → ledger verdict 'none' (re-searchable later)
+  v2 TYPO TIER (mined from the old fleet's proven scoring): zero exact but
+  exactly ONE candidate at edit-distance 1 with |len diff| <= 1 → Tier-B,
+  evidence method 'search_typo1' (fuzzy binds are always marked). Length
+  containment is NEVER a match ("Beat" != "Beatles"). Multiple typo
+  candidates → review. rescore_none_verdicts re-evaluates old 'none' rows
+  under v2 — search responses are fetch-cached, so the re-pass is free.
+  ZERO candidates either tier → ledger verdict 'none' (re-searchable later)
 
 Every search response goes through the fetch cache. search_attempt is the
 per-(artist, platform) ledger: a searched artist is never re-searched.
@@ -26,6 +32,19 @@ from psycopg import Connection
 from pipeline.fetch_cache import cached_fetch
 
 _PUNCT = re.compile(r"[^a-z0-9]+")
+
+
+def _edit1(a: str, b: str) -> bool:
+    """True iff normalized edit distance is exactly 1 (single typo class)."""
+    if a == b or abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b, strict=True)) == 1
+    longer, shorter = (a, b) if len(a) > len(b) else (b, a)
+    for i in range(len(longer)):
+        if longer[:i] + longer[i + 1:] == shorter:
+            return True
+    return False
 
 
 def normalize_name(name: str) -> str:
@@ -114,24 +133,32 @@ SEARCHERS = {
 
 
 def bind_artist_on_platform(
-    conn: Connection, artist_id: str, display_name: str, platform: str, *, searcher=None
+    conn: Connection, artist_id: str, display_name: str, platform: str, *,
+    searcher=None, fuzzy: bool = True, _rescore: bool = False,
 ) -> str:
     """Search one platform for one artist; apply the policy. Returns verdict."""
     already = conn.execute(
         "SELECT 1 FROM search_attempt WHERE artist_id = %s AND platform = %s",
         (artist_id, platform),
     ).fetchone()
-    if already:
+    if already and not _rescore:
         return "skipped"
     searcher = searcher or SEARCHERS[platform]
     candidates = searcher(conn, display_name)
     keys = artist_name_keys(conn, artist_id, display_name)
     exact = [c for c in candidates if normalize_name(c["name"]) in keys]
+    method = "search_exact_unique"
+    if not exact and fuzzy:
+        typo = [c for c in candidates
+                if any(_edit1(normalize_name(c["name"]), k) for k in keys)]
+        if typo:
+            exact = typo  # same downstream policy: unique → bind, multi → review
+            method = "search_typo1"
 
     if len(exact) == 1:
         c = exact[0]
         evidence = {
-            "method": "search_exact_unique", "query": display_name,
+            "method": method, "query": display_name,
             "candidate_name": c["name"], "candidates_total": len(candidates),
             "popularity": c["popularity"],
         }
@@ -165,6 +192,42 @@ def bind_artist_on_platform(
         (artist_id, platform, display_name, verdict, len(candidates)),
     )
     return verdict
+
+
+def rescore_none_verdicts(conn: Connection, limit: int = 1000, *, searcher_override=None) -> int:
+    """Re-evaluate 'none' ledger rows under the v2 typo tier. Search responses
+    are fetch-cached, so this is a zero-network pass (unless overridden in
+    tests). Returns rows upgraded to bound/review."""
+    rows = conn.execute(
+        """
+        SELECT sa.artist_id, sa.platform, a.display_name
+        FROM search_attempt sa JOIN artist a ON a.id = sa.artist_id
+        WHERE sa.verdict = 'none'
+        ORDER BY sa.searched_at LIMIT %s
+        """,
+        (limit,),
+    ).fetchall()
+    upgraded = 0
+    for artist_id, platform, name in rows:
+        conn.execute(
+            "DELETE FROM search_attempt WHERE artist_id = %s AND platform = %s",
+            (artist_id, platform),
+        )
+        try:
+            v = bind_artist_on_platform(
+                conn, str(artist_id), name, platform,
+                searcher=searcher_override, _rescore=True,
+            )
+        except Exception:  # noqa: BLE001 — per-source isolation, same law
+            conn.execute(
+                "INSERT INTO search_attempt (artist_id, platform, query, verdict) "
+                "VALUES (%s, %s, %s, 'none') ON CONFLICT DO NOTHING",
+                (artist_id, platform, name),
+            )
+            continue
+        if v in ("bound", "review"):
+            upgraded += 1
+    return upgraded
 
 
 def unbound_artists(conn: Connection, limit: int) -> list[tuple]:
