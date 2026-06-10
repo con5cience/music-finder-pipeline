@@ -186,13 +186,14 @@ async def prep_artist_clips(artist_id: str, source: str | None = None) -> int:
 
 def _embed_staged_sync(artist_id: str, source: str | None, ratio: float | None) -> int:
     from pipeline.heads import build_heads
-    from pipeline.staging import embed_staged
+    from pipeline.staging import cleanup_artist_dir, embed_staged
 
     settings = Settings()
     with psycopg.connect(settings.database_url) as conn:
         n = embed_staged(conn, _embedder(), artist_id, source, ratio,
                          heads=build_heads(_tag_scorer()))
         conn.commit()
+    cleanup_artist_dir(artist_id)  # only AFTER commit (crash-safe ordering)
     return n
 
 

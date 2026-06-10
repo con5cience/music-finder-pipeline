@@ -90,11 +90,7 @@ def sync(conn: Connection, work_dir: Path, *, apply: bool, force: bool = False) 
             _download(f"{BASE}/{serial}/{archive_name}", archive)
         verify_md5(archive, md5)
         extract_tables(archive, tables, dump_dir)
-    report = run_refresh(conn, dump_dir, apply=apply)
-    conn.execute(
-        "UPDATE mb_refresh_run SET serial = %s WHERE id = (SELECT max(id) FROM mb_refresh_run)",
-        (serial,),
-    )
+    report = run_refresh(conn, dump_dir, apply=apply, serial=serial)
     report["serial"] = serial
     return report
 

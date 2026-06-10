@@ -49,13 +49,13 @@ PLATFORM_PATTERNS: dict[str, tuple[str, str]] = {
 _CHUNK = 1 << 20  # 1 MiB
 
 
-def _assert_layout(path: Path, table: str) -> None:
+def _assert_layout(path: Path, table: str, expected: dict[str, int] | None = None) -> None:
     with open(path, encoding="utf-8") as f:
         first = f.readline()
     if not first:  # empty table file is legal
         return
     n = first.count("\t") + 1
-    want = EXPECTED_COLS[table]
+    want = (expected or EXPECTED_COLS)[table]
     if n != want:
         raise RuntimeError(
             f"mbdump/{table}: {n} columns, expected {want} — upstream MB schema drift; "
@@ -75,7 +75,7 @@ def load_mbdump(
         path = dump_dir / table
         if not path.exists():
             raise FileNotFoundError(f"missing mbdump table file: {path}")
-        _assert_layout(path, table)
+        _assert_layout(path, table, tables or EXPECTED_COLS)
         conn.execute(f"TRUNCATE {schema}.{table}")
         with conn.cursor() as cur, cur.copy(f"COPY {schema}.{table} FROM STDIN") as copy, open(path, "rb") as f:
             while chunk := f.read(_CHUNK):

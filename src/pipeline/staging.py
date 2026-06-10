@@ -63,6 +63,11 @@ def prep_artist(
     analysis. Returns tracks staged (0 = nothing pending/budget spent)."""
     from pipeline.heads import CpuAnalysisHead, HeadContext, run_heads
 
+    adir = _artist_dir(artist_id)
+    if adir.exists():
+        shutil.rmtree(adir)  # idempotent re-prep — ALSO clears stale dirs from
+        # terminated prior workflows even when this run stages nothing (review
+        # finding: early returns left year-old manifests for embed to trust)
     pending = pending_tracks(conn, artist_id, model, source)
     if not pending:
         return 0
@@ -73,9 +78,6 @@ def prep_artist(
     if not selected:
         return 0
 
-    adir = _artist_dir(artist_id)
-    if adir.exists():
-        shutil.rmtree(adir)  # idempotent re-prep: wholesale restage
     adir.mkdir(parents=True)
     cpu_head = [CpuAnalysisHead()]
     manifest: list[dict] = []
@@ -117,7 +119,9 @@ def prep_artist(
     if not manifest:
         shutil.rmtree(adir, ignore_errors=True)
         return 0
-    (adir / "manifest.json").write_text(json.dumps({"model": model, "tracks": manifest}))
+    (adir / "manifest.json").write_text(
+        json.dumps({"model": model, "source": source, "tracks": manifest})
+    )
     return len(manifest)
 
 
@@ -135,7 +139,10 @@ def embed_staged(
 
     adir = _artist_dir(artist_id)
     mpath = adir / "manifest.json"
-    if not mpath.exists():
+    stale = mpath.exists() and json.loads(mpath.read_text()).get("source") != source
+    if stale:
+        shutil.rmtree(adir, ignore_errors=True)  # source flipped since prep
+    if stale or not mpath.exists():
         from pipeline.embed_job import embed_artist_clips
 
         return embed_artist_clips(conn, embedder, artist_id, source, signal_ratio, heads=heads)
@@ -144,7 +151,11 @@ def embed_staged(
     usable: list[tuple] = []
     for t in manifest["tracks"]:
         for s, e, fname in t["segs"]:
-            usable.append((t["track_id"], s, e, str(adir / fname)))
+            p = adir / fname
+            # fault isolation (review finding): one truncated/empty clip must
+            # not fail the whole artist on every retry
+            if p.exists() and p.stat().st_size > 1024:
+                usable.append((t["track_id"], s, e, str(p)))
     if not usable:
         shutil.rmtree(adir, ignore_errors=True)
         return 0
@@ -179,8 +190,15 @@ def embed_staged(
     refresh_artist_centroid(conn, artist_id, embedder.name, source, signal_ratio)
     if source is not None and embedded:
         conn.execute("UPDATE artist SET embedding_source = %s WHERE id = %s", (source, artist_id))
-    shutil.rmtree(adir, ignore_errors=True)
+    # NO cleanup here (review finding): the stage dir outlives this function so
+    # the CALLER deletes it only after commit — a post-return commit failure
+    # would otherwise orphan the DB rollback from the disk state and force the
+    # retry onto the slow legacy path. cleanup_artist_dir is the companion.
     return embedded
+
+
+def cleanup_artist_dir(artist_id: str) -> None:
+    shutil.rmtree(_artist_dir(artist_id), ignore_errors=True)
 
 
 def clean_stale_stage(max_age_hours: float = 24.0) -> int:

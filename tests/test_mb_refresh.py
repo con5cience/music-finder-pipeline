@@ -16,6 +16,30 @@ def _write_redirect(dump_dir, rows):
             f.write("\t".join(r) + "\n")
 
 
+def test_refresh_loads_nonempty_redirect_file(conn, tmp_path):
+    # review finding: _assert_layout KeyError'd on artist_gid_redirect because
+    # it ignored the passed tables dict — only EMPTY fixture files dodged it
+    d = build_fixture_dump(tmp_path)
+    _write_redirect(d, [["00000000-feed-4bad-9bad-00000000aa41", "1", "2026-01-01 00:00:00+00"]])
+    report = run_refresh(conn, d, apply=False, serial="20990101-000001")
+    assert report["gates"]["ok"] is True  # load survived the non-empty redirect
+
+
+def test_gate_failure_gets_own_ledger_row_not_applied(conn, refresh_dump):
+    # review finding: gate failure used to stamp its serial onto the PREVIOUS
+    # (possibly applied) row via UPDATE max(id) — fail-open on already_applied
+    conn.execute("INSERT INTO mb_raw.artist (id, gid, name, sort_name) "
+                 "SELECT 99100000 + n, gen_random_uuid(), 'Filler', 'Filler' FROM generate_series(1, 50) n")
+
+    report = run_refresh(conn, refresh_dump, apply=True, serial="20990101-000002")
+    assert "aborted" in report
+    serial, applied = conn.execute(
+        "SELECT serial, applied_at FROM mb_refresh_run ORDER BY id DESC LIMIT 1").fetchone()
+    assert serial == "20990101-000002" and applied is None
+    from pipeline.mb_sync import already_applied
+    assert already_applied(conn, "20990101-000002") is False
+
+
 @pytest.fixture
 def refresh_dump(tmp_path):
     d = build_fixture_dump(tmp_path)

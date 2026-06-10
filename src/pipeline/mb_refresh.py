@@ -58,6 +58,18 @@ def sanity_gates(conn: Connection) -> dict:
     return gates
 
 
+_MERGES_SQL = """
+    SELECT x.id, x.mbid::text, nn.gid::text,
+           (x.embedding_source IS NOT NULL) AS old_embedded,
+           (t.id IS NOT NULL) AS target_exists,
+           (t.embedding_source IS NOT NULL) AS target_embedded
+    FROM artist x
+    JOIN mb_raw_next.artist_gid_redirect r ON r.gid = x.mbid::uuid
+    JOIN mb_raw_next.artist nn ON nn.id = r.new_id
+    LEFT JOIN artist t ON t.mbid = nn.gid
+    """
+
+
 def diff_and_apply(conn: Connection, *, apply: bool) -> dict:
     """The derive-diff. Dry-run computes counts without mutating the derived
     layer; apply runs the (idempotent) derivation + renames + merges."""
@@ -76,18 +88,7 @@ def diff_and_apply(conn: Connection, *, apply: bool) -> dict:
         WHERE x.display_name != n.name
         """
     ).fetchone()[0]
-    merges = conn.execute(
-        """
-        SELECT x.id, x.mbid::text, nn.gid::text,
-               (x.embedding_source IS NOT NULL) AS old_embedded,
-               (t.id IS NOT NULL) AS target_exists,
-               (t.embedding_source IS NOT NULL) AS target_embedded
-        FROM artist x
-        JOIN mb_raw_next.artist_gid_redirect r ON r.gid = x.mbid::uuid
-        JOIN mb_raw_next.artist nn ON nn.id = r.new_id
-        LEFT JOIN artist t ON t.mbid = nn.gid
-        """
-    ).fetchall()
+    merges = conn.execute(_MERGES_SQL).fetchall()
     out["merges"] = len(merges)
     out["reviews"] = sum(1 for m in merges if m[3] and m[5])
 
@@ -99,6 +100,10 @@ def diff_and_apply(conn: Connection, *, apply: bool) -> dict:
     out["new_identities"] = conn.execute(
         "SELECT count(*) FROM platform_identity"
     ).fetchone()[0] - before
+    # RE-SNAPSHOT after derive (review finding): derive can INSERT a merge
+    # TARGET (it inherits the merged artist's URLs), flipping target_exists.
+    # The stale snapshot caused unique violations on artist.mbid.
+    merges = conn.execute(_MERGES_SQL).fetchall()
     conn.execute(
         """
         UPDATE artist x SET display_name = n.name
@@ -106,6 +111,16 @@ def diff_and_apply(conn: Connection, *, apply: bool) -> dict:
         """
     )
     for aid, old_mbid, new_mbid, old_emb, target_exists, target_emb in merges:
+        if not target_exists:
+            # per-row recheck (review finding): an EARLIER loop iteration may
+            # have repointed another local artist to this same target —
+            # two locals merging into one absent target must not both UPDATE.
+            t = conn.execute(
+                "SELECT embedding_source IS NOT NULL FROM artist WHERE mbid = %s AND id != %s",
+                (new_mbid, aid),
+            ).fetchone()
+            if t is not None:
+                target_exists, target_emb = True, t[0]
         if not target_exists:
             conn.execute("UPDATE artist SET mbid = %s WHERE id = %s", (new_mbid, aid))
         elif old_emb and target_emb:
@@ -145,7 +160,12 @@ def swap(conn: Connection) -> None:
     conn.execute("ALTER SCHEMA mb_raw_next RENAME TO mb_raw")
 
 
-def run_refresh(conn: Connection, dump_dir: Path | str, *, apply: bool) -> dict:
+def run_refresh(
+    conn: Connection, dump_dir: Path | str, *, apply: bool, serial: str | None = None
+) -> dict:
+    """Every run — including gate-failure aborts — gets its OWN ledger row
+    carrying its serial (review finding: the old post-hoc UPDATE-max(id)
+    stamped a failed serial onto the previous APPLIED row, fail-open)."""
     prepare_shadow(conn)
     load_mbdump(conn, dump_dir, schema="mb_raw_next", tables=REFRESH_TABLES)
     gates = sanity_gates(conn)
@@ -153,17 +173,18 @@ def run_refresh(conn: Connection, dump_dir: Path | str, *, apply: bool) -> dict:
     if not gates["ok"]:
         conn.execute("DROP SCHEMA mb_raw_next CASCADE")
         report["aborted"] = "sanity gates failed — live state untouched"
-        return report
-    report.update(diff_and_apply(conn, apply=apply))
-    if apply:
-        swap(conn)
+    else:
+        report.update(diff_and_apply(conn, apply=apply))
+        if apply:
+            swap(conn)
     conn.execute(
         """
-        INSERT INTO mb_refresh_run (gates, adds, new_identities, renames, merges, reviews, applied_at)
-        VALUES (%s, %s, %s, %s, %s, %s, CASE WHEN %s THEN now() END)
+        INSERT INTO mb_refresh_run (serial, gates, adds, new_identities, renames, merges, reviews, applied_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, CASE WHEN %s THEN now() END)
         """,
-        (json.dumps(gates), report.get("adds"), report.get("new_identities"),
-         report.get("renames"), report.get("merges"), report.get("reviews"), apply),
+        (serial, json.dumps(gates), report.get("adds"), report.get("new_identities"),
+         report.get("renames"), report.get("merges"), report.get("reviews"),
+         apply and gates["ok"]),
     )
     return report
 

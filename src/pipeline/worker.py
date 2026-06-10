@@ -121,6 +121,14 @@ async def _heartbeat_loop(settings: Settings, role: str, queues: str) -> None:
                 conn.commit()
         except Exception:  # noqa: BLE001 — heartbeat must never kill the fleet
             pass
+        if role in ("all", "io"):
+            _gc_counter += 1
+            if _gc_counter % 120 == 1:  # hourly; first pass at startup
+                from pipeline.staging import clean_stale_stage
+
+                removed = await asyncio.to_thread(clean_stale_stage, 24.0)
+                if removed:
+                    logger.info("stage GC: removed %d orphaned dirs", removed)
         await asyncio.sleep(30)
 
 

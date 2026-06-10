@@ -103,13 +103,14 @@ class TagHead:
     def __init__(self, scorer):
         self._scorer = scorer
 
-    def run(self, ctx: HeadContext) -> None:
+    def run(self, ctx: HeadContext) -> bool:
         vecs = ensure_mulan_vecs(ctx, self._scorer)
         if vecs is None:
-            return
+            return False  # no scorer/clips — must NOT be ledgered (review finding)
         from pipeline.tags import replace_track_tags
 
         replace_track_tags(ctx.conn, ctx.track_id, self._scorer.score_vectors(vecs))
+        return True
 
 
 class PerceptualHead:
@@ -128,10 +129,10 @@ class PerceptualHead:
             self._anchors = np.asarray(emb.embed_text(texts), dtype=np.float32)
         return self._anchors
 
-    def run(self, ctx: HeadContext) -> None:
+    def run(self, ctx: HeadContext) -> bool:
         vecs = ensure_mulan_vecs(ctx, self._scorer)
         if vecs is None:
-            return
+            return False  # no scorer/clips — must NOT be ledgered (review finding)
         import json
 
         mean = vecs.mean(axis=0)
@@ -197,8 +198,14 @@ def artist_tag_pass(conn: Connection, heads: list, artist_id: str, vecs_list: li
 def run_heads(conn: Connection, heads: list, ctx: HeadContext) -> int:
     """Run heads pending for this track; record completions. Returns count run."""
     todo = pending_heads(conn, ctx.track_id, heads)
+    ran = 0
     for h in todo:
-        h.run(ctx)
+        # A head returning False explicitly DECLINED (scorer/vectors absent —
+        # vocabulary not bootstrapped yet): never ledger a no-op, or the skip
+        # becomes permanent (review finding). None (cpu head) = ran.
+        if h.run(ctx) is False:
+            continue
+        ran += 1
         conn.execute(
             """
             INSERT INTO track_head_runs (track_id, head, version, computed_at)
@@ -207,4 +214,4 @@ def run_heads(conn: Connection, heads: list, ctx: HeadContext) -> int:
             """,
             (ctx.track_id, h.name, h.version),
         )
-    return len(todo)
+    return ran

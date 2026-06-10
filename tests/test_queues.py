@@ -108,7 +108,6 @@ def test_every_workflow_dispatched_activity_is_registered():
     from pathlib import Path
 
     import pipeline.workflows as wf
-    from pipeline import activities as acts
     from pipeline.worker import GPU_ACTIVITIES, PLATFORM_ACTIVITIES, PREP_ACTIVITIES
 
     src = Path(wf.__file__).read_text()

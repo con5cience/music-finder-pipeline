@@ -59,11 +59,13 @@ def test_prep_then_embed_staged_roundtrip(conn, tmp_path, monkeypatch):
     emb = MockEmbedder(dim=8, name="mock-model")
     k = embed_staged(conn, emb, str(a), "bandcamp", 0.67)
     assert k >= 4  # 2 tracks x >=2 windows of 90s audio
+    from pipeline.staging import cleanup_artist_dir
+    cleanup_artist_dir(str(a))  # caller's post-commit job now (crash-safe ordering)
     src, clip_count = conn.execute(
         "SELECT a.embedding_source, ae.clip_count FROM artist a "
         "JOIN artist_embedding ae ON ae.artist_id = a.id WHERE a.id = %s", (a,)).fetchone()
     assert src == "bandcamp" and clip_count == k
-    assert not adir.exists()  # stage cleaned on success
+    assert not adir.exists()  # cleaned by cleanup_artist_dir above
 
     # retry-safety: a second embed call (manifest gone) falls back cleanly
     # to the legacy path which finds nothing pending → converge metadata
@@ -78,6 +80,21 @@ def test_embed_staged_fallback_without_manifest(conn, tmp_path, monkeypatch):
     # no prep ever ran → legacy single-pass path embeds directly
     k = embed_staged(conn, emb, str(a), "bandcamp", 0.33)
     assert k >= 2
+
+
+def test_embed_staged_source_mismatch_falls_back(conn, tmp_path, monkeypatch):
+    # review finding: a stale manifest from a terminated workflow with a
+    # DIFFERENT source must not pollute the new source's centroid
+    monkeypatch.setenv("PIPELINE_STAGE_DIR", str(tmp_path / "stage-flip"))
+    a = _artist(conn)
+    _bc_track(conn, a, "zz-st-x1", _wav(tmp_path, "x1", 90), 90, 0)
+    assert prep_artist(conn, str(a), "bandcamp", "mock-model") == 1
+    emb = MockEmbedder(dim=8, name="mock-model")
+    # embed called with a FLIPPED source → stale dir purged, legacy fallback used
+    k = embed_staged(conn, emb, str(a), "deezer", 0.5)
+    assert not (stage_root() / str(a)).exists()  # stale stage purged
+    src = conn.execute("SELECT embedding_source FROM artist WHERE id = %s", (a,)).fetchone()[0]
+    assert src in (None, "deezer")  # never 'bandcamp-clips-as-deezer'
 
 
 def test_clean_stale_stage(tmp_path, monkeypatch):
