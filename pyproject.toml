@@ -84,6 +84,7 @@ review-poll = "python -m pipeline.review_poller"   # apply admin-approved Tier-C
 factory-status = "python -m pipeline.factory_status"   # live activity snapshot (--watch for loop)
 tag-calibrate = "python -m pipeline.tag_calibration"   # refresh per-tag z-score moments
 publish = "python -m pipeline.publish"   # factory → serving DB (needs APP_DATABASE_URL)
+wave-seed = "python -m pipeline.wave_seeder"   # bounded-window mass seeding
 check.sequence = ["lint", "test"]
 setup.sequence = ["db-up", "migrate"]   # post-`uv sync` convenience (full: ./scripts/bootstrap.sh)
 
