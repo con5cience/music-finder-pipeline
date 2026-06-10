@@ -42,9 +42,12 @@ PLATFORMS: dict[str, PlatformSource] = {
         discovery_activity="discover_deezer_tracks",
         refresher="pipeline.sources.deezer:refresh_preview",
     ),
-    # "ample headroom in practice" at 50/s; HTML scraping, be polite.
+    # MASS-SCALE FINDING (2026-06-10): 5/s sustained tripped Bandcamp's
+    # limiter (366 429s in 30min). Bursts tolerate more; sustained does not.
+    # 1/s holds. 429s are never cached and identities stay pending, so a
+    # rate change re-scans them naturally.
     "bandcamp": PlatformSource(
-        "bandcamp", 5.0, audio_priority=2, floor=3, windowed=True,
+        "bandcamp", 1.0, audio_priority=2, floor=3, windowed=True,
         discovery_activity="discover_bandcamp_tracks",
         refresher="pipeline.sources.bandcamp:refresh_bandcamp",
     ),

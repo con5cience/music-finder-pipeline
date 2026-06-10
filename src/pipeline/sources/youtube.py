@@ -35,8 +35,13 @@ def fetch_channel_videos(channel_id: str) -> list[dict]:
         "no_warnings": True,
         "playlist_items": f"1-{_WALK_LIMIT}",
     }
-    with yt_dlp.YoutubeDL(opts) as y:
-        info = y.extract_info(f"https://www.youtube.com/channel/{channel_id}/videos", download=False)
+    try:
+        with yt_dlp.YoutubeDL(opts) as y:
+            info = y.extract_info(f"https://www.youtube.com/channel/{channel_id}/videos", download=False)
+    except yt_dlp.utils.DownloadError:
+        # channel-shape variants (no /videos tab, terminated, music-only
+        # topic channels) — a clean EMPTY verdict, not a retry storm
+        return []
     return [e for e in (info.get("entries") or []) if e]
 
 

@@ -62,3 +62,29 @@ def test_discover_is_idempotent(conn):
     f = lambda cid: ENTRIES  # noqa: E731
     assert discover_youtube(conn, str(a), "UCzzfixture0000000000000", fetcher=f) == 2
     assert discover_youtube(conn, str(a), "UCzzfixture0000000000000", fetcher=f) == 0
+
+
+def test_channel_without_videos_tab_is_empty_not_fatal(conn, monkeypatch):
+    # Mass-scale finding: some channels have no /videos tab — yt-dlp raises;
+    # discovery must yield 0 (→ terminal 'empty' verdict), not a retry storm.
+    import yt_dlp
+
+    import pipeline.sources.youtube as yt
+
+    def boom(url, download=False):
+        raise yt_dlp.utils.DownloadError("This channel does not have a videos tab")
+
+    class FakeYDL:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        extract_info = staticmethod(boom)
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+    assert yt.fetch_channel_videos("UCzz-no-tab") == []
