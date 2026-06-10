@@ -3,16 +3,9 @@ fallback, scan verdicts, centroid purity. All fixture ids synthetic."""
 
 from __future__ import annotations
 
-from functools import partial
-
 from pipeline.bench.mock import MockEmbedder
 from pipeline.cascade import audio_identities, choose_source, floor_ratio, mark_scanned, source_yields
-from pipeline.embed_job import embed_artist_clips as _embed_artist_clips
-
-# These tests exercise cascade/selection mechanics with fake audio paths;
-# Wave-1 analysis (which decodes real audio) is covered by test_analysis /
-# test_embed_windowed.
-embed_artist_clips = partial(_embed_artist_clips, run_analysis=False)
+from pipeline.embed_job import embed_artist_clips
 
 MBID = "00000000-feed-4bad-9bad-000000000555"
 

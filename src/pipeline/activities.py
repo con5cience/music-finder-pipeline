@@ -183,10 +183,13 @@ def _tag_scorer():
 
 def _embed_artist_sync(artist_id: str, source: str | None, ratio: float | None) -> int:
     from pipeline.embed_job import embed_artist_clips
+    from pipeline.heads import build_heads
 
     settings = Settings()
     with psycopg.connect(settings.database_url) as conn:
-        n = embed_artist_clips(conn, _embedder(), artist_id, source, ratio, tag_scorer=_tag_scorer())
+        n = embed_artist_clips(
+            conn, _embedder(), artist_id, source, ratio, heads=build_heads(_tag_scorer())
+        )
         conn.commit()
     return n
 

@@ -220,7 +220,10 @@ def test_backfill_analyzes_embedded_tracks_idempotently(conn, tmp_path):
             assert paths
             return [("zz-bf-genre", 0.5)]
 
-    done, skipped = backfill_tracks(conn, 10, artist_id=str(a), tag_scorer=FakeScorer())
+    from pipeline.heads import CpuAnalysisHead, TagHead
+
+    heads = [CpuAnalysisHead(), TagHead(FakeScorer())]
+    done, skipped = backfill_tracks(conn, heads, 10, artist_id=str(a))
     assert (done, skipped) == (1, 0)
     assert conn.execute(
         "SELECT integrity FROM track_analysis WHERE track_id = %s", (t,)
@@ -228,8 +231,8 @@ def test_backfill_analyzes_embedded_tracks_idempotently(conn, tmp_path):
     assert conn.execute(
         "SELECT count(*) FROM track_tag_scores WHERE track_id = %s", (t,)
     ).fetchone()[0] == 1
-    # idempotent: already analyzed at current version → nothing to do
-    assert backfill_tracks(conn, 10, artist_id=str(a), tag_scorer=FakeScorer()) == (0, 0)
+    # idempotent: every head current (track_head_runs) → nothing to do
+    assert backfill_tracks(conn, heads, 10, artist_id=str(a)) == (0, 0)
 
 
 def test_track_tag_upsert_roundtrip(conn):
@@ -252,3 +255,66 @@ def test_track_tag_upsert_roundtrip(conn):
     )
     assert set(rows) == {"dubstep", "2-step"}  # 'uk garage' gone, not lingering
     assert abs(rows["dubstep"] - 0.33) < 1e-6
+
+
+def test_perceptual_head_axes_and_instruments(conn, tmp_path):
+    # Wave-2: anchor-pair axes + instrument top-k from a FAKE MuLan (hermetic).
+    import soundfile as sf
+
+    from pipeline.heads import (
+        AXIS_ANCHORS,
+        INSTRUMENT_TOP_K,
+        INSTRUMENT_VOCAB,
+        HeadContext,
+        PerceptualHead,
+        run_heads,
+    )
+
+    class FakeMulan:
+        def embed_text(self, texts):
+            # deterministic distinct unit vectors per text
+            out = []
+            for i, _t in enumerate(texts):
+                v = np.zeros(8)
+                v[i % 8] = 1.0
+                out.append(v.tolist())
+            return out
+
+        def embed(self, clips):
+            v = np.zeros(8)
+            v[0] = 1.0  # aligns with the FIRST anchor (danceability positive)
+            return [v.tolist() for _ in clips]
+
+    class FakeScorer:
+        _embedder = FakeMulan()
+
+        def _ensure(self):
+            pass
+
+    a = conn.execute(
+        "INSERT INTO artist (display_name, mbid) VALUES ('Perceptual Fixture', "
+        "'00000000-feed-4bad-9bad-000000000ddd') RETURNING id"
+    ).fetchone()[0]
+    t = conn.execute(
+        "INSERT INTO audio_track (artist_id, platform, platform_track_id, audio_url, duration_s, "
+        "binding_tier, verification_status) VALUES (%s,'deezer','zz-pc-1','/x.mp3',30,'A','verified') "
+        "RETURNING id",
+        (a,),
+    ).fetchone()[0]
+    wav = tmp_path / "pc.wav"
+    sf.write(wav, np.zeros(8000, dtype=np.float32), 8000)
+
+    heads = [PerceptualHead(FakeScorer())]
+    ctx = HeadContext(conn=conn, track_id=t, artist_id=str(a), platform="deezer",
+                      mono=np.zeros(8000), sr=8000, clip_paths=[str(wav)])
+    assert run_heads(conn, heads, ctx) == 1
+    row = conn.execute(
+        "SELECT danceability, instruments, model FROM track_perceptual WHERE track_id = %s", (t,)
+    ).fetchone()
+    # audio vec == danceability-positive anchor → cos(pos)=1, cos(neg)=0 → axis = +1
+    assert abs(row[0] - 1.0) < 1e-5
+    assert len(row[1]) == INSTRUMENT_TOP_K
+    assert all(i["name"] in INSTRUMENT_VOCAB for i in row[1])
+    assert len(AXIS_ANCHORS) == 6
+    # idempotent: current version recorded → second run is a no-op
+    assert run_heads(conn, heads, ctx) == 0

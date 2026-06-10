@@ -30,9 +30,24 @@ def _identity(conn, a, pid="zz-sc-user"):
 
 def _fake_fetcher(url: str):
     if "/resolve" in url:
-        return 200, "application/json", FIX.joinpath("soundcloud_resolve.json").read_bytes()
+        # Shift the USER id too: the live proof committed fetch_cache rows for
+        # the real /users/{id}/tracks URL — an unshifted id would cache-HIT
+        # the committed real body and bypass this fetcher entirely.
+        import json as _json
+
+        doc = _json.loads(FIX.joinpath("soundcloud_resolve.json").read_bytes())
+        doc["id"] = 990000000000 + int(doc["id"])
+        return 200, "application/json", _json.dumps(doc).encode()
     if "/tracks?" in url:
-        return 200, "application/json", FIX.joinpath("soundcloud_tracks.json").read_bytes()
+        # Real capture — but the live proof committed these REAL track ids to
+        # the dev DB, so replaying them collides on UNIQUE (the memorialized
+        # fixture-id lesson). Shift ids into the synthetic range.
+        import json as _json
+
+        doc = _json.loads(FIX.joinpath("soundcloud_tracks.json").read_bytes())
+        for t in doc.get("collection", []):
+            t["id"] = 990000000000 + int(t["id"])
+        return 200, "application/json", _json.dumps(doc).encode()
     raise AssertionError(f"unexpected fetch: {url}")
 
 

@@ -1,12 +1,11 @@
-"""Wave-1 backfill: run analysis heads over ALREADY-embedded tracks.
+"""Head backfill: run pending AnalysisHeads over ALREADY-embedded tracks.
 
-The embed pass only analyzes pending tracks; the pre-Wave-1 corpus (614
-artists) needs its heads computed retroactively. Re-downloads via the same
-self-healing fetch (URLs rot), decodes once, runs CPU heads + the tag head on
-the same windows the embedder used (the windower is deterministic). Never
-re-embeds. Idempotent: tracks with a current-version analysis row are skipped.
+The embed pass runs heads on new tracks; this sweeps the existing corpus
+whenever a head is added or versioned (track_head_runs is the per-head
+ledger — ADR-015 pluggable heads). Re-downloads via the shared self-healing
+fetch, decodes once, cuts the SAME windows the embedder uses. Never re-embeds.
 
-Run:  uv run python -m pipeline.backfill_analysis --limit 50
+Run:  uv run poe analysis-backfill --limit 100000 --batch 25
 """
 
 from __future__ import annotations
@@ -16,65 +15,58 @@ from pathlib import Path
 
 from psycopg import Connection
 
-from pipeline.analysis import ANALYSIS_VERSION, analyze_track, upsert_track_analysis
-from pipeline.embed_job import (
-    _clips_for_track,
-    _decode,
-    _default_refresher,
-    _fetch_with_refresh,
-    fetch_audio,
-)
+from pipeline.embed_job import _clips_for_track, _decode, _default_refresher, _fetch_with_refresh, fetch_audio
+from pipeline.heads import HeadContext, run_heads
 
 
-def unanalyzed_embedded_tracks(conn: Connection, limit: int, artist_id: str | None = None) -> list[tuple]:
-    """Embedded tracks lacking a current-version analysis row."""
-    return conn.execute(
-        """
+def tracks_missing_heads(
+    conn: Connection, heads: list, limit: int, artist_id: str | None = None
+) -> list[tuple]:
+    """Embedded tracks where any head's current version hasn't run."""
+    clauses, params = [], []
+    for h in heads:
+        clauses.append(
+            "NOT EXISTS (SELECT 1 FROM track_head_runs r "
+            "WHERE r.track_id = t.id AND r.head = %s AND r.version >= %s)"
+        )
+        params.extend([h.name, h.version])
+    sql = f"""
         SELECT DISTINCT t.id, t.audio_url, t.platform, t.platform_track_id, t.artist_id::text
         FROM audio_track t
         JOIN clip_embedding ce ON ce.track_id = t.id
         WHERE t.audio_url IS NOT NULL
           AND (%s::uuid IS NULL OR t.artist_id = %s::uuid)
-          AND NOT EXISTS (
-              SELECT 1 FROM track_analysis ta
-              WHERE ta.track_id = t.id AND ta.analysis_version >= %s
-          )
+          AND ({" OR ".join(clauses)})
         ORDER BY 1
         LIMIT %s
-        """,
-        (artist_id, artist_id, ANALYSIS_VERSION, limit),
-    ).fetchall()
+    """
+    return conn.execute(sql, (artist_id, artist_id, *params, limit)).fetchall()
 
 
 def backfill_tracks(
     conn: Connection,
+    heads: list,
     limit: int = 100,
     *,
     artist_id: str | None = None,
-    tag_scorer=None,
     fetch=fetch_audio,
     refresher=_default_refresher,
 ) -> tuple[int, int]:
-    """Analyze up to `limit` embedded-but-unanalyzed tracks. Returns (done, skipped)."""
+    """Run pending heads on up to `limit` embedded tracks. (done, skipped)."""
     done = skipped = 0
     with tempfile.TemporaryDirectory(prefix="backfill-") as tmp:
         workdir = Path(tmp)
-        for tid, url, platform, ptid, owner_id in unanalyzed_embedded_tracks(conn, limit, artist_id):
+        for tid, url, platform, ptid, owner_id in tracks_missing_heads(conn, heads, limit, artist_id):
             path = _fetch_with_refresh(conn, url, platform, ptid, workdir, fetch, refresher)
             if path is None:
                 skipped += 1
                 continue
             mono, sr = _decode(path)
-            upsert_track_analysis(conn, tid, analyze_track(mono, sr))
-            if tag_scorer is not None:
-                from pipeline.tags import replace_track_tags
-
-                # SAME windows the embedder cuts (shared _clips_for_track —
-                # review finding: the inline copy was drifting, which would
-                # have made backfilled tag scores incomparable to embed-time
-                # scores right when the backfill exists to calibrate them)
-                segs = _clips_for_track(mono, sr, path, platform, None, workdir, f"bf-{tid}")
-                replace_track_tags(conn, tid, tag_scorer.score_clips(owner_id, [p for _s, _e, p in segs]))
+            segs = _clips_for_track(mono, sr, path, platform, None, workdir, f"bf-{tid}")
+            run_heads(conn, heads, HeadContext(
+                conn=conn, track_id=tid, artist_id=owner_id, platform=platform,
+                mono=mono, sr=sr, clip_paths=[p for _s, _e, p in segs],
+            ))
             done += 1
     return done, skipped
 
@@ -85,20 +77,22 @@ def main() -> None:
     import psycopg
 
     from pipeline.config import Settings
+    from pipeline.heads import build_heads
     from pipeline.tags import MulanTagScorer, load_vocabulary
 
-    ap = argparse.ArgumentParser(description="backfill Wave-1 analysis over embedded tracks")
+    ap = argparse.ArgumentParser(description="backfill pending analysis heads over embedded tracks")
     ap.add_argument("--limit", type=int, default=100, help="total tracks this run")
     ap.add_argument("--batch", type=int, default=25, help="tracks per transaction")
-    ap.add_argument("--no-tags", action="store_true", help="CPU heads only (skip MuLan)")
+    ap.add_argument("--no-tags", action="store_true", help="CPU heads only (skip MuLan heads)")
     args = ap.parse_args()
 
     with psycopg.connect(Settings().database_url) as conn:
         scorer = None if args.no_tags else MulanTagScorer(load_vocabulary(conn))
+        heads = build_heads(scorer)
         total_done = total_skipped = 0
         while total_done + total_skipped < args.limit:
             batch = min(args.batch, args.limit - total_done - total_skipped)
-            done, skipped = backfill_tracks(conn, batch, tag_scorer=scorer)
+            done, skipped = backfill_tracks(conn, heads, batch)
             conn.commit()  # per-batch: a crash loses at most one batch, not the run
             total_done += done
             total_skipped += skipped

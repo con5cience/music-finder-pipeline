@@ -114,9 +114,12 @@ def test_analysis_and_tag_heads_run_in_embed_pass(conn, tmp_path):
 
     a = _artist(conn)
     _bc_track(conn, a, "zz-w-h1", _wav(tmp_path, "h1", 90), 90, "/album/x", 0)
+    from pipeline.heads import CpuAnalysisHead, TagHead
+
     n = embed_artist_clips(
         conn, MockEmbedder(dim=8, name="mock-model"), a,
-        source="bandcamp", signal_ratio=0.33, tag_scorer=FakeScorer(),
+        source="bandcamp", signal_ratio=0.33,
+        heads=[CpuAnalysisHead(), TagHead(FakeScorer())],
     )
     assert n >= 2
     analysis = conn.execute(
@@ -143,7 +146,7 @@ def test_preview_platform_still_single_clip(conn, tmp_path):
     )
     n = embed_artist_clips(
         conn, MockEmbedder(dim=8, name="mock-model"), a,
-        source="deezer", signal_ratio=0.1, run_analysis=False,  # fake path: mechanics only
+        source="deezer", signal_ratio=0.1,  # no heads (default): mechanics only
     )
     assert n == 1
     seg = conn.execute(

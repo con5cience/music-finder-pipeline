@@ -8,16 +8,10 @@ audio, so these tests exercise the full store path without model weights.
 from __future__ import annotations
 
 import math
-from functools import partial
 from pathlib import Path
 
 from pipeline.bench.mock import MockEmbedder
-from pipeline.embed_job import _audio_ext, pending_tracks
-from pipeline.embed_job import embed_artist_clips as _embed_artist_clips
-
-# Mechanics tests with fake audio paths: Wave-1 analysis (real decoding) is
-# covered by test_analysis / test_embed_windowed.
-embed_artist_clips = partial(_embed_artist_clips, run_analysis=False)
+from pipeline.embed_job import _audio_ext, embed_artist_clips, pending_tracks
 
 
 def _artist(conn, name: str) -> str:

@@ -247,8 +247,7 @@ def embed_artist_clips(
     *,
     fetch=fetch_audio,
     refresher=_default_refresher,
-    run_analysis: bool = True,
-    tag_scorer=None,
+    heads: list | None = None,
 ) -> int:
     """Embed all pending tracks for an artist and store stamped rows + centroid.
 
@@ -259,7 +258,12 @@ def embed_artist_clips(
     (review finding: silently returning 0 let workflows complete 'embedded'
     with no centroid). A sourceless call adopts artist.embedding_source when
     set (review finding: legacy calls must not blend platforms or wipe the
-    signal_ratio). Returns the number of clips embedded.
+    signal_ratio).
+
+    `heads`: ADR-015 AnalysisHead list (pipeline.heads.build_heads) — run
+    per-track on the same decoded waveform/windows, idempotent via
+    track_head_runs. None (default, tests) = embedding mechanics only;
+    production (activities) passes the full list. Returns clips embedded.
     """
     if source is None:
         locked = conn.execute(
@@ -295,22 +299,24 @@ def embed_artist_clips(
     with tempfile.TemporaryDirectory(prefix="embed-") as tmp:
         workdir = Path(tmp)
         usable: list[tuple] = []  # (track_id, seg_start, seg_end, clip_path)
-        track_clip_paths: dict = {}  # track_id -> its window files (for the tag head)
         for tid, url, duration_s, platform, ptid, _release, _ri, _ti in selected:
             path = _fetch_with_refresh(conn, url, platform, ptid, workdir, fetch, refresher)
             if path is None:
                 continue  # unfetchable after refresh — skip, stays pending
-            # decode ONCE when any head needs the waveform (analysis, windowing);
-            # preview tracks with analysis off embed their file untouched
-            needs_decode = run_analysis or platform in WINDOWED_PLATFORMS
+            # decode ONCE when any head needs the waveform (heads, windowing);
+            # preview tracks with no heads embed their file untouched
+            needs_decode = bool(heads) or platform in WINDOWED_PLATFORMS
             mono, native_sr = _decode(path) if needs_decode else (None, None)
-            if run_analysis:
-                from pipeline.analysis import analyze_track, upsert_track_analysis
-
-                upsert_track_analysis(conn, tid, analyze_track(mono, native_sr))
-            for seg in _clips_for_track(mono, native_sr, path, platform, duration_s, workdir, str(tid)):
+            segs = _clips_for_track(mono, native_sr, path, platform, duration_s, workdir, str(tid))
+            for seg in segs:
                 usable.append((tid, *seg))
-                track_clip_paths.setdefault(tid, []).append(seg[2])
+            if heads:
+                from pipeline.heads import HeadContext, run_heads
+
+                run_heads(conn, heads, HeadContext(
+                    conn=conn, track_id=tid, artist_id=artist_id, platform=platform,
+                    mono=mono, sr=native_sr, clip_paths=[p for _s, _e, p in segs],
+                ))
         if not usable:
             raise AudioFetchError(
                 f"all {len(selected)} selected tracks failed to fetch for artist {artist_id} "
@@ -318,12 +324,6 @@ def embed_artist_clips(
             )
         clips = [Clip(id=f"{tid}:{s}", artist_id=artist_id, path=path) for tid, s, _e, path in usable]
         vectors = embedder.embed(clips)
-
-        if tag_scorer is not None:
-            from pipeline.tags import replace_track_tags
-
-            for tid, paths in track_clip_paths.items():
-                replace_track_tags(conn, tid, tag_scorer.score_clips(artist_id, paths))
 
         for (tid, seg_start, seg_end, _path), vec in zip(usable, vectors, strict=True):
             conn.execute(
