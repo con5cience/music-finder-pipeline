@@ -44,6 +44,11 @@ they were mid-flight. Config-change caveat: `docker compose up -d` RECREATES
 services whose definition changed — that bounces factory-db too; pause
 nothing, everything reconnects, but expect a ~60s blip.
 
+## Venv law
+uv sync MUST carry --all-groups (models/muq are dependency-groups, not
+main deps): `uv sync --all-groups --extra wave3`. An extra-only sync
+SILENTLY REMOVES torch/librosa from the host venv (2026-06-11 incident).
+
 ## One-shot ops (no cron by design)
 
 | Command | What |
