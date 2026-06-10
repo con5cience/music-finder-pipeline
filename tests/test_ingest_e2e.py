@@ -40,12 +40,22 @@ def _artist_without_audio_identities(db_url: str) -> str | None:
         return row[0] if row else None
 
 
-async def test_cascade_ingest_end_to_end_unbound(migrated_db):
-    # Real activities + a real bootstrapped artist with zero audio-role
-    # identities: proves wiring (plan → unbound) with no network or GPU.
-    artist_id = _artist_without_audio_identities(migrated_db)
-    if artist_id is None:
-        pytest.skip("no bootstrapped artists (run `poe mb-bootstrap` first)")
+async def test_cascade_ingest_end_to_end_unbound(migrated_db, monkeypatch):
+    # Real activities against the TEST db (env pinned — activities read
+    # Settings()), with a SYNTHETIC artist (review altitude finding: no more
+    # corpus archaeology; the test owns its fixture and never skips).
+    monkeypatch.setenv("PIPELINE_DATABASE_URL", migrated_db)
+    with psycopg.connect(migrated_db) as setup:
+        setup.execute(
+            "DELETE FROM artist WHERE mbid = '00000000-feed-4bad-9bad-000000000e2e'")
+        artist_id = str(setup.execute(
+            "INSERT INTO artist (display_name, mbid) VALUES ('E2E Fixture', "
+            "'00000000-feed-4bad-9bad-000000000e2e') RETURNING id").fetchone()[0])
+        setup.execute(
+            "INSERT INTO platform_identity (artist_id, platform, platform_id, page_type) "
+            "VALUES (%s, 'tidal', 'zz-e2e-tidal', 'artist') ON CONFLICT DO NOTHING",
+            (artist_id,))
+        setup.commit()
 
     try:
         env = await WorkflowEnvironment.start_time_skipping()
