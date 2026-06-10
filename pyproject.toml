@@ -83,6 +83,7 @@ search-bind = "python -m pipeline.search_bind"   # 3d B-tier binding over unboun
 review-poll = "python -m pipeline.review_poller"   # apply admin-approved Tier-C bindings
 factory-status = "python -m pipeline.factory_status"   # live activity snapshot (--watch for loop)
 tag-calibrate = "python -m pipeline.tag_calibration"   # refresh per-tag z-score moments
+publish = "python -m pipeline.publish"   # factory → serving DB (needs APP_DATABASE_URL)
 check.sequence = ["lint", "test"]
 setup.sequence = ["db-up", "migrate"]   # post-`uv sync` convenience (full: ./scripts/bootstrap.sh)
 
