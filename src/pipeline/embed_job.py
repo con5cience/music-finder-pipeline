@@ -26,6 +26,8 @@ from pipeline.windows import peak_windows
 
 _DEFAULT_SEGMENT_S = 30
 WINDOWS_PER_TRACK = 4   # 3 tracks x 4 windows ≈ the 10-12 Deezer-preview budget
+PREVIEW_TRACKS_CAP = 12  # non-windowed sources: clips per artist (SC stores ~50 previews;
+                         # without this cap they ALL embedded — observability catch 2026-06-10)
 TRACKS_PER_SOURCE = 3   # full-track sources: floor=3 tracks, newest across releases
 MIN_TRACK_S = 60        # skits/intros pollute windows; allowed only when nothing else
 
@@ -188,7 +190,10 @@ def _select_for_source(pending: list[tuple], source: str | None, budget: int = T
     everything pending. `budget` already accounts for previously-embedded
     tracks (review finding: re-runs must not grow past TRACKS_PER_SOURCE)."""
     if source not in WINDOWED_PLATFORMS:
-        return pending
+        if budget <= 0:
+            return []
+        ordered = sorted(pending, key=lambda r: (r[6] is None, r[6], r[7] is None, r[7]))
+        return ordered[:budget]
     if budget <= 0:
         return []
     eligible = [r for r in pending if (r[2] or 0) >= MIN_TRACK_S] or list(pending)
@@ -287,8 +292,8 @@ def embed_artist_clips(
                 conn.execute("UPDATE artist SET embedding_source = %s WHERE id = %s", (source, artist_id))
         return 0
 
-    budget = TRACKS_PER_SOURCE
-    if source in WINDOWED_PLATFORMS:
+    budget = TRACKS_PER_SOURCE if source in WINDOWED_PLATFORMS else PREVIEW_TRACKS_CAP
+    if source is not None:
         budget -= _embedded_track_count(conn, artist_id, embedder.name, source)
     selected = _select_for_source(pending, source, budget)
     if not selected:

@@ -155,3 +155,34 @@ def test_preview_platform_still_single_clip(conn, tmp_path):
         (a,),
     ).fetchone()
     assert seg == (0, 30)
+
+
+def test_preview_platform_respects_track_budget(conn, tmp_path):
+    # Observability catch: SC (non-windowed) embedded ALL ~50 stored previews
+    # (49 clips vs deezer's 12) — the budget only capped windowed platforms.
+    # Preview sources cap at PREVIEW_TRACKS_CAP newest-by-walk-order, and
+    # re-runs must not creep past it (same mechanics as the windowed budget).
+    import json as _json
+
+    from pipeline.embed_job import PREVIEW_TRACKS_CAP
+
+    a = _artist(conn)
+    for i in range(PREVIEW_TRACKS_CAP + 8):
+        conn.execute(
+            "INSERT INTO audio_track (artist_id, platform, platform_track_id, audio_url, duration_s, "
+            "binding_tier, binding_evidence, verification_status) "
+            "VALUES (%s, 'soundcloud', %s, %s, 30, 'A', %s, 'verified')",
+            (a, f"zz-pcap-{i}", f"/audio/pcap-{i}.mp3",
+             _json.dumps({"release_index": i, "track_index": i})),
+        )
+    emb = MockEmbedder(dim=8, name="mock-model")
+    n1 = embed_artist_clips(conn, emb, a, source="soundcloud", signal_ratio=2.0)
+    assert n1 == PREVIEW_TRACKS_CAP
+    n2 = embed_artist_clips(conn, emb, a, source="soundcloud", signal_ratio=2.0)
+    assert n2 == 0  # no creep on re-run
+    newest = conn.execute(
+        "SELECT (t.binding_evidence->>'track_index')::int FROM clip_embedding ce "
+        "JOIN audio_track t ON t.id = ce.track_id WHERE t.artist_id = %s "
+        "ORDER BY 1 DESC LIMIT 1", (a,),
+    ).fetchone()[0]
+    assert newest == PREVIEW_TRACKS_CAP - 1  # newest-first selection, not random

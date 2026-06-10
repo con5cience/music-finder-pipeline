@@ -80,6 +80,7 @@ mb-bootstrap = "python -m pipeline.mb_bootstrap"   # usage: uv run poe mb-bootst
 analysis-backfill = "python -m pipeline.backfill_analysis"   # Wave-1 heads over already-embedded tracks
 search-bind = "python -m pipeline.search_bind"   # 3d B-tier binding over unbound artists
 review-poll = "python -m pipeline.review_poller"   # apply admin-approved Tier-C bindings
+factory-status = "python -m pipeline.factory_status"   # live activity snapshot (--watch for loop)
 check.sequence = ["lint", "test"]
 setup.sequence = ["db-up", "migrate"]   # post-`uv sync` convenience (full: ./scripts/bootstrap.sh)
 
