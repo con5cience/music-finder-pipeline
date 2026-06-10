@@ -27,6 +27,13 @@ from pipeline.config import Settings
 from pipeline.queues import DISCOVERY_ACTIVITIES, GPU_QUEUE, PLATFORM_QUEUES, PLATFORMS, PREP_QUEUE
 from pipeline.workflows import IngestArtistWorkflow
 
+# Activity registries by queue — module-level so the coherence tests can
+# assert every workflow-dispatched activity has a worker (the unregistered-
+# activity hang has now bitten THREE times: bandcamp test queue, youtube
+# test queue, and embed_artist_staged parking 981 staged artists in prod).
+GPU_ACTIVITIES = [activities.embed_artist, activities.embed_artist_staged]
+PREP_ACTIVITIES = [activities.prep_artist_clips]
+
 # DERIVED from the PLATFORMS descriptor — never hand-edit (review finding:
 # parallel registries drift; test_queues asserts this wiring stays coherent).
 PLATFORM_ACTIVITIES: dict[str, list] = {platform: [] for platform in PLATFORM_QUEUES}
@@ -69,7 +76,7 @@ def build_workers(client: Client, settings: Settings, role: str = "all") -> list
         workers.append(Worker(
             client,
             task_queue=PREP_QUEUE,
-            activities=[activities.prep_artist_clips],
+            activities=PREP_ACTIVITIES,
             # CPU staging. Measured: 20 cores at load ~5.5 with conc 8 —
             # the cap was serial proxy fetches (now pooled), not CPU.
             max_concurrent_activities=12,
@@ -85,7 +92,7 @@ def build_workers(client: Client, settings: Settings, role: str = "all") -> list
         workers.append(Worker(
             client,
             task_queue=GPU_QUEUE,
-            activities=[activities.embed_artist],
+            activities=GPU_ACTIVITIES,
             max_concurrent_activities=gpu_conc,
         ))
     return workers

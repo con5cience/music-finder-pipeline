@@ -98,3 +98,25 @@ def test_io_concurrency_caps_are_sane():
     for p in PLATFORMS.values():
         assert 1 <= p.io_concurrency <= 16
     assert PLATFORMS["youtube"].io_concurrency == 1  # most fragile platform
+
+
+def test_every_workflow_dispatched_activity_is_registered():
+    # The unregistered-activity hang, 3rd occurrence (embed_artist_staged
+    # parked 981 staged artists): every activities.X the workflow source
+    # dispatches must be registered on SOME worker queue.
+    import re
+    from pathlib import Path
+
+    import pipeline.workflows as wf
+    from pipeline import activities as acts
+    from pipeline.worker import GPU_ACTIVITIES, PLATFORM_ACTIVITIES, PREP_ACTIVITIES
+
+    src = Path(wf.__file__).read_text()
+    dispatched = set(re.findall(r"activities\.(\w+)", src))
+    dispatched |= set(DISCOVERY_ACTIVITIES.values())
+    registered = {f.__name__ for f in GPU_ACTIVITIES + PREP_ACTIVITIES}
+    registered |= {f.__name__ for fns in PLATFORM_ACTIVITIES.values() for f in fns}
+    # pipeline-queue activities (workflow + DB) are registered inline:
+    registered |= {"cascade_plan", "record_scan", "choose_embed_source"}
+    missing = dispatched - registered
+    assert not missing, f"workflow dispatches unregistered activities: {missing}"
