@@ -39,7 +39,10 @@ async def run(total: int, batch: int, low_water: int) -> None:
             continue
         with psycopg.connect(settings.database_url) as conn:
             # natural pagination: completed artists drop out (embedded, or
-            # every audio identity carries a terminal verdict)
+            # every audio identity carries a terminal verdict). Discovery
+            # artists (mbid NULL — ADR-019 provisional identity) sort FIRST:
+            # the trickle is dozens/day and must surface in hours, not at
+            # corpus-completion; the corpus pays minutes for it.
             rows = [r[0] for r in conn.execute(
                 """
                 SELECT DISTINCT pi.artist_id::text FROM platform_identity pi
@@ -47,7 +50,7 @@ async def run(total: int, batch: int, low_water: int) -> None:
                 WHERE pi.platform IN ('deezer','bandcamp','soundcloud')
                   AND pi.scan_status = 'pending'
                   AND a.embedding_source IS NULL
-                ORDER BY 1 LIMIT %s
+                ORDER BY (a.mbid IS NULL) DESC, 1 LIMIT %s
                 """, (min(batch, total - seeded),),
             ).fetchall()]
         if not rows:
