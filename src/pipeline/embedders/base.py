@@ -18,6 +18,11 @@ from pipeline.bench.types import Clip
 from pipeline.device import select_device
 
 
+MAX_AUDIO_SECONDS = 900  # nothing we embed is longer; poisoned/deleted-under-
+# read files (outage: GC swept a live stage dir; libsndfile spun on the open
+# handle for hours) fail FAST here instead
+
+
 def load_audio_mono(path: str, target_sr: int) -> torch.Tensor:
     """Read an audio file as a mono float32 waveform resampled to target_sr."""
     data, sr = sf.read(path, dtype="float32", always_2d=True)  # (frames, channels)

@@ -207,18 +207,25 @@ def cleanup_artist_dir(artist_id: str) -> None:
     shutil.rmtree(_artist_dir(artist_id), ignore_errors=True)
 
 
-def clean_stale_stage(max_age_hours: float = 24.0) -> int:
-    """GC orphaned stage dirs (failed workflows, abandoned runs)."""
+def clean_stale_stage(max_age_hours: float = 48.0) -> int:
+    """GC stage dirs that are TRULY orphaned. Age alone is not orphanhood
+    (outage post-mortem: a deep backlog stretched prep→embed gaps to hours;
+    a 6h age-only GC deleted QUEUED work under a live reader and wedged the
+    GPU lane for 6h). A dir with a manifest is awaiting embed — eligible
+    only after max_age_hours (default 48h, generous vs any backlog). A dir
+    WITHOUT a manifest is an incomplete prep — eligible after 6h."""
     root = stage_root()
     if not root.exists():
         return 0
-    cutoff = time.time() - max_age_hours * 3600
+    now = time.time()
     removed = 0
     for d in root.iterdir():
-        try:  # the gpu worker deletes dirs CONCURRENTLY (post-commit cleanup) —
-            # a vanishing dir mid-scan is normal, not an error (it killed the
-            # io worker's heartbeat task before this guard existed)
-            if d.is_dir() and d.stat().st_mtime < cutoff:
+        try:  # concurrent deletion by the gpu worker is normal, not an error
+            if not d.is_dir():
+                continue
+            age_h = (now - d.stat().st_mtime) / 3600
+            has_manifest = (d / "manifest.json").exists()
+            if (has_manifest and age_h > max_age_hours) or (not has_manifest and age_h > 6):
                 shutil.rmtree(d, ignore_errors=True)
                 removed += 1
         except OSError:
