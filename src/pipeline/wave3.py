@@ -217,7 +217,10 @@ _PENDING_SQL = {
 }
 
 
-def run_wave3(conn: Connection, limit: int, artist_id: str | None = None, head_name: str = "structure") -> dict:
+def run_wave3(
+    conn: Connection, limit: int, artist_id: str | None = None,
+    head_name: str = "structure", published_only: bool = False,
+) -> dict:
     """Selected-slice runner: fetches audio via the standard self-healing
     path, runs available wave-3 heads on tracks lacking them."""
     import tempfile
@@ -226,6 +229,12 @@ def run_wave3(conn: Connection, limit: int, artist_id: str | None = None, head_n
     from pipeline.embed_job import _decode, _default_refresher, _fetch_with_refresh, fetch_audio
 
     head = _HEADS[head_name]()
+    # Locked rollout policy (2026-06-11): wave-3 depth goes to PUBLISHED
+    # artists (embedded + mbid — the publish gate), never blanket.
+    published_filter = (
+        "AND t.artist_id IN (SELECT id FROM artist WHERE embedding_source IS NOT NULL AND mbid IS NOT NULL)"
+        if published_only else ""
+    )
     rows = conn.execute(
         f"""
         SELECT t.id, t.audio_url, t.platform, t.platform_track_id
@@ -234,6 +243,7 @@ def run_wave3(conn: Connection, limit: int, artist_id: str | None = None, head_n
         WHERE t.audio_url IS NOT NULL
           AND {_PENDING_SQL[head_name]}
           {"AND t.artist_id = %(aid)s" if artist_id else ""}
+          {published_filter}
         ORDER BY t.id LIMIT %(lim)s
         """,
         {"lim": limit, "aid": artist_id},
@@ -265,9 +275,10 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=100)
     ap.add_argument("--artist", default=None)
     ap.add_argument("--head", default="structure", choices=sorted(_HEADS))
+    ap.add_argument("--published", action="store_true", help="published artists only (locked rollout policy)")
     args = ap.parse_args()
     with psycopg.connect(Settings().database_url) as conn:
-        report = run_wave3(conn, args.limit, args.artist, args.head)
+        report = run_wave3(conn, args.limit, args.artist, args.head, published_only=args.published)
         conn.commit()
     print(json.dumps(report, indent=2))
 
