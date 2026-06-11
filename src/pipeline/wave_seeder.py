@@ -16,6 +16,54 @@ from __future__ import annotations
 import asyncio
 import time
 
+# Audio platforms whose discovery queues run at interactive rates. youtube is
+# deliberately absent: its queue is server-capped at 0.1/s (politeness law), so
+# a yt-only artist occupies a window slot for HOURS while these need minutes.
+_FAST_PLATFORMS = ("deezer", "bandcamp", "soundcloud")
+
+
+def select_seed_batch(conn, limit: int) -> list[str]:
+    """Next artists to seed: fast lanes first, yt-only as last resort.
+
+    One mixed query melted the factory on 2026-06-11: every batch carried its
+    natural share of yt-only artists (~8%), each parking in the window for
+    hours behind the 0.1/s youtube queue, until the whole window was
+    yt-waiters and throughput pinned to the yt ceiling (~300/hr). Seeding
+    yt-only artists ONLY when no fast-lane work remains mirrors the cascade's
+    own floor=4 last-resort ranking for youtube. Discovery artists (mbid NULL,
+    ADR-019 provisional) still sort first within each lane: the trickle is
+    dozens/day and must surface in hours, not at corpus-completion.
+    """
+    rows = [r[0] for r in conn.execute(
+        """
+        SELECT DISTINCT pi.artist_id::text, (a.mbid IS NULL) AS prio
+        FROM platform_identity pi
+        JOIN artist a ON a.id = pi.artist_id
+        WHERE pi.platform = ANY(%s)
+          AND pi.scan_status = 'pending'
+          AND a.embedding_source IS NULL
+        ORDER BY prio DESC, 1 LIMIT %s
+        """, (list(_FAST_PLATFORMS), limit),
+    ).fetchall()]
+    if len(rows) < limit:  # fast lane drained — top up with the yt-only cohort
+        rows += [r[0] for r in conn.execute(
+            """
+            SELECT DISTINCT pi.artist_id::text, (a.mbid IS NULL) AS prio
+            FROM platform_identity pi
+            JOIN artist a ON a.id = pi.artist_id
+            WHERE pi.platform = 'youtube'
+              AND pi.scan_status = 'pending'
+              AND a.embedding_source IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM platform_identity p2
+                WHERE p2.artist_id = pi.artist_id
+                  AND p2.platform = ANY(%s)
+                  AND p2.scan_status = 'pending')
+            ORDER BY prio DESC, 1 LIMIT %s
+            """, (list(_FAST_PLATFORMS), limit - len(rows)),
+        ).fetchall()]
+    return rows
+
 
 async def run(total: int, batch: int, low_water: int) -> None:
     import psycopg
@@ -39,22 +87,8 @@ async def run(total: int, batch: int, low_water: int) -> None:
             continue
         with psycopg.connect(settings.database_url) as conn:
             # natural pagination: completed artists drop out (embedded, or
-            # every audio identity carries a terminal verdict). Discovery
-            # artists (mbid NULL — ADR-019 provisional identity) sort FIRST:
-            # the trickle is dozens/day and must surface in hours, not at
-            # corpus-completion; the corpus pays minutes for it.
-            rows = [r[0] for r in conn.execute(
-                """
-                SELECT DISTINCT pi.artist_id::text, (a.mbid IS NULL) AS prio
-                FROM platform_identity pi
-                JOIN artist a ON a.id = pi.artist_id
-                -- yt gate opened 2026-06-11: +38.5k yt-only artists join the denominator
-                WHERE pi.platform IN ('deezer','bandcamp','soundcloud','youtube')
-                  AND pi.scan_status = 'pending'
-                  AND a.embedding_source IS NULL
-                ORDER BY prio DESC, 1 LIMIT %s
-                """, (min(batch, total - seeded),),
-            ).fetchall()]
+            # every audio identity carries a terminal verdict).
+            rows = select_seed_batch(conn, min(batch, total - seeded))
         if not rows:
             print(f"corpus exhausted at {seeded} seeded — done", flush=True)
             return

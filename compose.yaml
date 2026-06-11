@@ -125,7 +125,9 @@ services:
     image: music-finder-pipeline:local
     restart: on-failure
     entrypoint: [".venv/bin/python", "-m", "pipeline.wave_seeder"]
-    command: ["--total", "451000", "--batch", "1000", "--low-water", "2000"]
+    # 500k > the 492,786 post-yt-gate denominator: the real stop is the
+    # corpus-exhausted check, not this bound (451k would have stopped short).
+    command: ["--total", "500000", "--batch", "1000", "--low-water", "2000"]
     environment:
       PIPELINE_DATABASE_URL: postgresql://pipeline:pipeline@factory-db:5432/pipeline
       PIPELINE_TEMPORAL_ADDRESS: temporal:7233
