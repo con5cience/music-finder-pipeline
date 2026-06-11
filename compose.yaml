@@ -143,13 +143,12 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command: ["while true; do .venv/bin/python -m pipeline.publish --incremental --limit 100000; sleep 3600; done"]
     env_file: .env
+    # host network: BOTH dbs bind loopback-only by design — the sync reaches
+    # them as the host does, and the loopback-only posture stays intact.
+    network_mode: host
     environment:
-      PIPELINE_DATABASE_URL: postgresql://pipeline:pipeline@factory-db:5432/pipeline
-      APP_DATABASE_URL: postgresql://musicfinder:musicfinder@host.docker.internal:5433/musicfinder
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      - factory-db
+      PIPELINE_DATABASE_URL: postgresql://pipeline:pipeline@localhost:5440/pipeline
+      APP_DATABASE_URL: postgresql://musicfinder:musicfinder@localhost:5433/musicfinder
 
 networks:
   factory:

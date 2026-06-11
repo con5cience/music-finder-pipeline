@@ -149,6 +149,7 @@ def test_incremental_publish_watermark_and_bans(conn):
     from pipeline.publish import publish_incremental
 
     _serving_schema(conn)
+    conn.execute("UPDATE publish_watermark SET last_run = 'epoch' WHERE id = 'default'")  # hermetic
     a1 = conn.execute(
         "INSERT INTO artist (display_name, mbid, embedding_source) VALUES "
         "('Inc One', '00000000-feed-4bad-9bad-000000000aa1', 'deezer') RETURNING id").fetchone()[0]
@@ -161,15 +162,15 @@ def test_incremental_publish_watermark_and_bans(conn):
     a2 = conn.execute(
         "INSERT INTO artist (display_name, mbid, embedding_source) VALUES "
         "('Inc Two', '00000000-feed-4bad-9bad-000000000aa2', 'deezer') RETURNING id").fetchone()[0]
-    conn.execute(
-        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
-        "VALUES (%s, 'mock-model', 2, '[0,1]', 3, 1.0)", (a2,))
+    conn.execute(  # clock_timestamp: in-txn now() predates any wall-clock watermark
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio, computed_at) "
+        "VALUES (%s, 'mock-model', 2, '[0,1]', 3, 1.0, clock_timestamp())", (a2,))
     assert publish_incremental(conn, conn) == 1
     # ban a1 → next sync prunes the serving row and never re-publishes
     conn.execute(
         "INSERT INTO ban_ledger (artist_id, mbid, display_name) VALUES (%s, %s, 'Inc One')",
         (a1, "00000000-feed-4bad-9bad-000000000aa1"))
-    conn.execute("UPDATE artist_embedding SET computed_at = now() WHERE artist_id = %s", (a1,))
+    conn.execute("UPDATE artist_embedding SET computed_at = clock_timestamp() WHERE artist_id = %s", (a1,))
     assert publish_incremental(conn, conn) == 0     # banned: excluded despite the change
     assert conn.execute("SELECT count(*) FROM artists WHERE name = 'Inc One'").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM artists WHERE name = 'Inc Two'").fetchone()[0] == 1

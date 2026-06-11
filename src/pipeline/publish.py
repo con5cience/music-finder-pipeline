@@ -94,7 +94,8 @@ def publish_incremental(factory: Connection, app: Connection, limit: int = 10000
     — anything changing mid-run lands next hour), publish changed artists,
     and prune app rows for newly banned ones."""
     wm = factory.execute("SELECT last_run FROM publish_watermark WHERE id = 'default'").fetchone()[0]
-    factory.execute("UPDATE publish_watermark SET last_run = clock_timestamp() WHERE id = 'default'")  # wall clock, not txn-frozen now()
+    # clock_timestamp: wall clock, not txn-frozen now()
+    factory.execute("UPDATE publish_watermark SET last_run = clock_timestamp() WHERE id = 'default'")
     n = publish_artists(factory, app, limit, since=wm)
     for (aid, mbid) in factory.execute(
         "SELECT artist_id, mbid::text FROM ban_ledger WHERE banned_at >= %s", (wm,)
