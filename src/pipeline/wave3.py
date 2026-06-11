@@ -251,14 +251,14 @@ def run_wave3(
     done = skipped = 0
     with tempfile.TemporaryDirectory(prefix="wave3-") as tmp:
         for tid, url, platform, ptid in rows:
-            path = _fetch_with_refresh(conn, url, platform, ptid, Path(tmp), fetch_audio, _default_refresher)
-            if path is None:
-                skipped += 1
-                continue
-            mono, sr = _decode(path)
-            if head.run(conn, tid, mono, sr):
-                done += 1
-            else:
+            try:  # per-track isolation: one rotted URL must not kill the slice
+                path = _fetch_with_refresh(conn, url, platform, ptid, Path(tmp), fetch_audio, _default_refresher)
+                if path is None:
+                    skipped += 1
+                    continue
+                mono, sr = _decode(path)
+                done += 1 if head.run(conn, tid, mono, sr) else 0
+            except Exception:  # noqa: BLE001 — selective slices, skip and move on
                 skipped += 1
     return {"head": head.name, "done": done, "skipped": skipped}
 

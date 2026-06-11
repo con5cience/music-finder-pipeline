@@ -34,6 +34,9 @@ c = psycopg.connect('postgresql://pipeline:pipeline@localhost:5440/pipeline')
 n = c.execute(\"SELECT count(DISTINCT artist_id) FROM artist_tag_scores\").fetchone()[0]
 print(f'artists with v2 artist-mean tags now: {n}')" >> "$LOG" 2>&1
 
+if [ "${MAINT_ONLY_SWEEP:-0}" = "1" ]; then
+  log "stages 2-4 skipped (sweep-only run)"
+else
 log "--- stage 2: fp16 parity experiment (report-only) ---"
 timeout 1800 $PY - >> "$LOG" 2>&1 <<'PYEOF'
 import numpy as np, torch
@@ -84,6 +87,7 @@ import psycopg
 c = psycopg.connect('postgresql://pipeline:pipeline@localhost:5440/pipeline')
 print(c.execute(\"SELECT count(*) FROM artist_embedding WHERE computed_at > now() - interval '20 minutes'\").fetchone()[0] * 3)")
 log "conc-3 retest: ~$RATE/hr, OOMs=$OOMS"
+fi
 fi
 # trap restores conc 2 + restarts
 
