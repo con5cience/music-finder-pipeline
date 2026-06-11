@@ -84,7 +84,7 @@ def catch_code_locally(port: int) -> str:
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
-            self.wfile.write("<h2>crates: code received - return to the terminal.</h2>".encode())
+            self.wfile.write(b"<h2>crates: code received - return to the terminal.</h2>")
 
         def log_message(self, *a):  # silence
             pass
