@@ -125,11 +125,15 @@ async def _heartbeat_loop(settings: Settings, role: str, queues: str) -> None:
         if role in ("all", "io"):
             _gc_counter += 1
             if _gc_counter % 120 == 1:  # hourly; first pass at startup
-                from pipeline.staging import clean_stale_stage
+                try:  # liveness-loop law: nothing in here may raise
+                    from pipeline.staging import clean_stale_stage
 
-                removed = await asyncio.to_thread(clean_stale_stage)  # orphan-aware defaults (48h manifests / 6h incomplete)
-                if removed:
-                    logger.info("stage GC: removed %d orphaned dirs", removed)
+                    # orphan-aware defaults: 48h manifests / 6h incomplete
+                    removed = await asyncio.to_thread(clean_stale_stage)
+                    if removed:
+                        logger.info("stage GC: removed %d dirs", removed)
+                except Exception:  # noqa: BLE001
+                    logger.exception("stage GC failed (non-fatal)")
         await asyncio.sleep(30)
 
 
