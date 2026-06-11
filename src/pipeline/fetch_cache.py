@@ -102,6 +102,11 @@ def cached_fetch(
 
     if post_json is not None and fetcher is None:
         status, content_type, body = _http_post_json(url, post_json)
+    elif post_json is not None:
+        try:  # custom fetchers (tests, token-bearing platforms) get the payload
+            status, content_type, body = fetcher(url, post_json=post_json)
+        except TypeError:
+            status, content_type, body = fetcher(url)
     else:
         status, content_type, body = (fetcher or _http_get)(url)
     if not (200 <= status < 300 or status == 404):

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 
-from pipeline.discovery import _subdomain, admit, crawl_tag, dedup_gate
+from pipeline.discovery import _subdomain, admit, crawl_label, crawl_tag, dedup_gate, discover_wave
 
 MBID = "00000000-feed-4bad-9bad-000000000dc1"
 
@@ -82,3 +82,47 @@ def test_dedup_gates_and_admit(conn, monkeypatch):
         "SELECT scan_status FROM platform_identity WHERE platform='bandcamp' AND platform_id='zz-disc-fresh'"
     ).fetchone()[0]
     assert st == 'pending'  # the wave seeder's food
+
+
+def test_label_roster_crawl(conn, monkeypatch):
+    monkeypatch.setenv("PIPELINE_FETCH_CACHE_DIR", "/tmp/test-disc-cache")
+    html = b"""<html><ol id="bands">
+      <li><a href="https://zz-roster-a.bandcamp.com">A</a></li>
+      <li><a href="http://zz-roster-b.bandcamp.com/music">B</a></li>
+      <li><a href="https://zz-thelabel.bandcamp.com/about">self</a></li>
+    </ol></html>"""
+    rep = crawl_label(conn, "zz-thelabel", fetcher=lambda url: (200, "text/html", html))
+    assert rep["new"] == 2 and rep["roster_seen"] == 2  # self excluded
+    tags = conn.execute(
+        "SELECT tags FROM bc_candidate WHERE platform_id = 'zz-roster-a'").fetchone()[0]
+    assert tags == ["label:zz-thelabel"]
+
+
+def test_discover_wave_harvests_and_isolates(conn, monkeypatch):
+    monkeypatch.setenv("PIPELINE_FETCH_CACHE_DIR", "/tmp/test-disc-cache")
+    import json as _json
+
+    tree_html = ('<div data-blob="' + _json.dumps({
+        "appData": {"initialState": {
+            "genres": [{"slug": "zz-g1"}, {"slug": "zz-g2"}],
+            "subgenres": [{"slug": "zz-s1"}],
+        }}}).replace('"', '&quot;') + '"></div>').encode()
+
+    calls = {"n": 0}
+
+    def fetcher(url, post_json=None):
+        calls["n"] += 1
+        if "tag/ambient" in url:
+            return 200, "text/html", tree_html
+        tag = (post_json or {}).get("tag_norm_names", [""])[0]
+        if tag == "zz-g2":  # one tag's API errors — wave must survive
+            return 500, "application/json", b"{}"
+        return 200, "application/json", _json.dumps(
+            {"results": [_item(f"zz-wave-{calls['n']}", f"Wave Band {calls['n']}")], "cursor": ""}
+        ).encode()
+
+    rep = discover_wave(conn, pages=1, admit_budget=1, fetcher=fetcher)
+    assert rep["tags_crawled"] == 3
+    assert rep["errors"] == 1          # the 500 tag isolated, wave survived
+    assert rep["new_candidates"] == 2  # g1 + s1
+    assert rep["admitted"] == 1        # budget respected

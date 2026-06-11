@@ -34,6 +34,67 @@ def _subdomain(band_url: str) -> str | None:
     return m.group(1) if m else None
 
 
+def harvest_tag_tree(conn: Connection, *, fetcher=None) -> list[str]:
+    """BC's official genre tree (27 genres + 237 subgenres), harvested live
+    from any tag page's data-blob — the wave's coverage list."""
+    import html as ihtml
+    import json
+    import re as _re
+
+    r = cached_fetch(conn, "bandcamp", "https://bandcamp.com/tag/ambient?sort=date", fetcher=fetcher)
+    blob = json.loads(ihtml.unescape(_re.search(r'data-blob="([^"]*)"', r.body.decode("utf-8", "replace")).group(1)))
+    st = blob["appData"]["initialState"]
+    slugs = [g["slug"] for g in st.get("genres", []) if g.get("slug")]
+    slugs += [g["slug"] for g in st.get("subgenres", []) if g.get("slug")]
+    seen: set[str] = set()
+    return [x for x in slugs if not (x in seen or seen.add(x))]
+
+
+def crawl_label(conn: Connection, label_subdomain: str, *, fetcher=None) -> dict:
+    """Label-roster discovery: a label's /artists page lists its roster —
+    high-trust edges (a label vouches for its bands)."""
+    import re as _re
+
+    r = cached_fetch(conn, "bandcamp", f"https://{label_subdomain}.bandcamp.com/artists", fetcher=fetcher)
+    h = r.body.decode("utf-8", "replace")
+    found = set(_re.findall(r'https?://([a-z0-9-]+)\.bandcamp\.com', h))
+    found.discard(label_subdomain)
+    new = 0
+    for pid in sorted(found):
+        ins = conn.execute(
+            """
+            INSERT INTO bc_candidate (platform_id, band_name, band_url, tags, status_reason)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (platform_id) DO NOTHING RETURNING id
+            """,
+            (pid, pid, f"https://{pid}.bandcamp.com", [f"label:{label_subdomain}"], "label_roster"),
+        ).fetchone()
+        if ins:
+            new += 1
+    return {"label": label_subdomain, "roster_seen": len(found), "new": new}
+
+
+def discover_wave(conn: Connection, pages: int = 1, admit_budget: int = 0, *, fetcher=None) -> dict:
+    """The standing organ: crawl the ENTIRE official tag tree's 'new' slices,
+    dedup, admit within budget. One-shot by design (no cron law)."""
+    tags = harvest_tag_tree(conn, fetcher=fetcher)
+    crawls = []
+    for t in tags:
+        try:
+            crawls.append(crawl_tag(conn, t, pages, fetcher=fetcher))
+        except Exception as e:  # noqa: BLE001 — one bad tag must not kill the wave
+            crawls.append({"tag": t, "error": type(e).__name__})
+    dedup = dedup_gate(conn, limit=100000)
+    admitted = admit(conn, admit_budget) if admit_budget else 0
+    return {
+        "tags_crawled": len(tags),
+        "new_candidates": sum(c.get("new", 0) for c in crawls),
+        "errors": sum(1 for c in crawls if "error" in c),
+        "dedup": dedup,
+        "admitted": admitted,
+    }
+
+
 def crawl_tag(conn: Connection, tag: str, pages: int = 2, *, fetcher=None) -> dict:
     """Walk the 'new' slice for one tag; upsert each band once."""
     cursor = "*"
@@ -191,6 +252,8 @@ def main() -> None:
 
     ap = argparse.ArgumentParser(description="Bandcamp discovery (ADR-019)")
     ap.add_argument("--tags", default="", help="comma-separated tag list to crawl")
+    ap.add_argument("--wave", action="store_true", help="crawl the ENTIRE official tag tree")
+    ap.add_argument("--label", default="", help="crawl one label's roster page")
     ap.add_argument("--pages", type=int, default=2)
     ap.add_argument("--admit", type=int, default=0, help="trickle valve: admit N oldest candidates")
     import sys
@@ -199,11 +262,16 @@ def main() -> None:
     args = ap.parse_args(argv)
     report: dict = {"crawl": [], "dedup": None, "admitted": 0}
     with psycopg.connect(Settings().database_url) as conn:
-        for tag in [t.strip() for t in args.tags.split(",") if t.strip()]:
-            report["crawl"].append(crawl_tag(conn, tag, args.pages))
-        report["dedup"] = dedup_gate(conn)
-        if args.admit:
-            report["admitted"] = admit(conn, args.admit)
+        if args.wave:
+            report = discover_wave(conn, args.pages, args.admit)
+        else:
+            if args.label:
+                report["crawl"].append(crawl_label(conn, args.label))
+            for tag in [t.strip() for t in args.tags.split(",") if t.strip()]:
+                report["crawl"].append(crawl_tag(conn, tag, args.pages))
+            report["dedup"] = dedup_gate(conn)
+            if args.admit:
+                report["admitted"] = admit(conn, args.admit)
         conn.commit()
     print(json.dumps(report, indent=2, default=str))
 
