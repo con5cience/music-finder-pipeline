@@ -150,6 +150,22 @@ services:
       PIPELINE_DATABASE_URL: postgresql://pipeline:pipeline@localhost:5440/pipeline
       APP_DATABASE_URL: postgresql://musicfinder:musicfinder@localhost:5433/musicfinder
 
+  # The watchdog that outlives every operator session: flatlined embeds for
+  # two checks → force-recreate the workers (the wedged-reader class). Needs
+  # the docker socket — the ONE privileged mount in the stack, for exactly
+  # one verb (compose up -d --force-recreate).
+  factory-doctor:
+    image: docker:27-cli
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/workspace/scripts/factory-doctor.sh"]
+    environment:
+      PIPELINE_DATABASE_URL: postgresql://pipeline:pipeline@factory-db:5432/pipeline
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/workspace:ro
+    depends_on:
+      - factory-db
+
 networks:
   factory:
     name: music-factory

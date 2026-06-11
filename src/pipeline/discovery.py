@@ -153,12 +153,16 @@ def dedup_gate(conn: Connection, limit: int = 1000) -> dict:
     exact-unique name match (the binding ladder's Tier-B test, reused)."""
     out = {"identity": 0, "name": 0}
     rows = conn.execute(
-        "SELECT id, platform_id, band_name FROM bc_candidate WHERE status = 'candidate' "
+        "SELECT id, platform_id, band_name, status_reason FROM bc_candidate WHERE status = 'candidate' "
         "ORDER BY first_seen_at LIMIT %s", (limit,)
     ).fetchall()
-    for cid, pid, name in rows:
+    for cid, pid, name, src_reason in rows:
         banned = conn.execute(
-            "SELECT 1 FROM ban_ledger WHERE platform_ids @> %s OR lower(display_name) = lower(%s)",
+            # pid bans match by pid; NAME bans apply only to ledger rows
+            # WITHOUT pids (deliberate name-bans) — a new band sharing a
+            # banned artist's name is not collateral (review finding)
+            """SELECT 1 FROM ban_ledger WHERE platform_ids @> %s
+               OR (platform_ids = '[]'::jsonb AND lower(display_name) = lower(%s))""",
             (f'["bandcamp:{pid}"]', name),
         ).fetchone()
         if banned:
@@ -175,6 +179,11 @@ def dedup_gate(conn: Connection, limit: int = 1000) -> dict:
                 "UPDATE bc_candidate SET status = 'dedup_existing', status_reason = 'identity', "
                 "artist_id = %s WHERE id = %s", (known[0], cid))
             out["identity"] += 1
+            continue
+        if src_reason == "label_roster":
+            # label rosters carry SUBDOMAINS as names — the name tier would
+            # wrong-merge slug collisions ('silverapples' → Silver Apples).
+            # Identity-tier only; they admit provisionally (review finding).
             continue
         norm = _sql_norm(name)
         matches = conn.execute(

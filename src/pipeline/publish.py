@@ -96,7 +96,14 @@ def publish_incremental(factory: Connection, app: Connection, limit: int = 10000
     wm = factory.execute("SELECT last_run FROM publish_watermark WHERE id = 'default'").fetchone()[0]
     # clock_timestamp: wall clock, not txn-frozen now()
     factory.execute("UPDATE publish_watermark SET last_run = clock_timestamp() WHERE id = 'default'")
-    n = publish_artists(factory, app, limit, since=wm)
+    # drain-until-empty (review finding: a single LIMIT window under a big
+    # backlog skipped everyone past the cap forever once the watermark moved)
+    n = 0
+    while True:
+        batch = publish_artists(factory, app, limit, since=wm)
+        n += batch
+        if batch < limit:
+            break
     for (aid, mbid) in factory.execute(
         "SELECT artist_id, mbid::text FROM ban_ledger WHERE banned_at >= %s", (wm,)
     ).fetchall():
@@ -283,10 +290,15 @@ def main() -> None:
     with psycopg.connect(Settings().database_url) as factory, psycopg.connect(app_dsn) as app:
         if args.incremental:
             n = publish_incremental(factory, app, args.limit)
+            # COMMIT ORDER LAW (review finding, high): app rows FIRST, then
+            # the watermark. A crash between them re-publishes idempotent
+            # upserts next run; the reverse order silently never publishes
+            # the lost window again.
+            app.commit()
             factory.commit()
         else:
             n = publish_artists(factory, app, args.limit)
-        app.commit()
+            app.commit()
     print(f"published={n}", flush=True)
 
 
