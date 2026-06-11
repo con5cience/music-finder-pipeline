@@ -17,7 +17,6 @@ import torchaudio.functional as AF
 from pipeline.bench.types import Clip
 from pipeline.device import select_device
 
-
 MAX_AUDIO_SECONDS = 900  # nothing we embed is longer; poisoned/deleted-under-
 # read files (outage: GC swept a live stage dir; libsndfile spun on the open
 # handle for hours) fail FAST here instead

@@ -78,7 +78,6 @@ def similarity(fp_a: bytes, fp_b: bytes) -> float:
     best = 0.0
     # full scan at the coarse step (~0.37s) — cheap at these lengths
     offsets = list(range(0, len(b) - n + 1)) or [0]
-    xor_bits = np.unpackbits  # local alias
     def score(off: int) -> float:
         x = np.bitwise_xor(a, b[off : off + n])
         ham = np.unpackbits(x.view(np.uint8)).sum()

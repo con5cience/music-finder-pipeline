@@ -91,7 +91,7 @@ def test_embed_staged_source_mismatch_falls_back(conn, tmp_path, monkeypatch):
     assert prep_artist(conn, str(a), "bandcamp", "mock-model") == 1
     emb = MockEmbedder(dim=8, name="mock-model")
     # embed called with a FLIPPED source → stale dir purged, legacy fallback used
-    k = embed_staged(conn, emb, str(a), "deezer", 0.5)
+    embed_staged(conn, emb, str(a), "deezer", 0.5)
     assert not (stage_root() / str(a)).exists()  # stale stage purged
     src = conn.execute("SELECT embedding_source FROM artist WHERE id = %s", (a,)).fetchone()[0]
     assert src in (None, "deezer")  # never 'bandcamp-clips-as-deezer'
