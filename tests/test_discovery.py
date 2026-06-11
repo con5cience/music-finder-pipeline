@@ -66,7 +66,7 @@ def test_dedup_gates_and_admit(conn, monkeypatch):
     ], "cursor": ""}]
     crawl_tag(conn, "zz-tag2", pages=1, fetcher=_fake_fetcher(pages))
     out = dedup_gate(conn)
-    assert out == {"identity": 1, "name": 1}
+    assert out == {"banned": 0, "identity": 1, "name": 1}
     # name-unique candidate handed its identity to the EXISTING artist
     got = conn.execute(
         "SELECT artist_id FROM platform_identity WHERE platform='bandcamp' AND platform_id='zz-disc-namer'"

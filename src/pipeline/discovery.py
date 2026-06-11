@@ -148,79 +148,80 @@ def _sql_norm(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
-def dedup_gate(conn: Connection, limit: int = 1000) -> dict:
-    """Mark candidates we already know: bound platform identity, or an
-    exact-unique name match (the binding ladder's Tier-B test, reused)."""
-    out = {"identity": 0, "name": 0}
-    rows = conn.execute(
-        "SELECT id, platform_id, band_name, status_reason FROM bc_candidate WHERE status = 'candidate' "
-        "ORDER BY first_seen_at LIMIT %s", (limit,)
+def dedup_gate(conn: Connection, limit: int = 100000) -> dict:
+    """Mark candidates we already know — SET-BASED (the per-candidate name
+    query seq-scanned the artist table 5,613 times on the first full wave;
+    hours instead of seconds). One normalized-name temp table per run.
+    Alias-tier matching is deliberately dropped at wave scale: a missed
+    alias match just means a provisional identity (safe — fingerprints and
+    MB reconciliation catch true duplicates); a wrong merge is not."""
+    out = {"banned": 0, "identity": 0, "name": 0}
+    # 1) bans: pid-tier + (pid-less ledger rows only) name-tier
+    out["banned"] = conn.execute(
+        """
+        UPDATE bc_candidate c SET status = 'rejected', status_reason = 'banned'
+        FROM ban_ledger b
+        WHERE c.status = 'candidate'
+          AND (b.platform_ids @> jsonb_build_array('bandcamp:' || c.platform_id)
+               OR (b.platform_ids = '[]'::jsonb
+                   AND lower(b.display_name) = lower(c.band_name)))
+        """
+    ).rowcount
+    # 2) identity-tier: the bandcamp pid is already bound
+    out["identity"] = conn.execute(
+        """
+        UPDATE bc_candidate c SET status = 'dedup_existing',
+               status_reason = 'identity', artist_id = pi.artist_id
+        FROM platform_identity pi
+        WHERE c.status = 'candidate'
+          AND pi.platform = 'bandcamp' AND pi.platform_id = c.platform_id
+        """
+    ).rowcount
+    # 3) name-tier: exact-unique normalized display-name match hands the
+    #    identity to the EXISTING artist (a binding, not a discovery).
+    #    Label-roster rows are EXEMPT (band_name = subdomain; slug
+    #    collisions wrong-merged — review finding).
+    conn.execute("DROP TABLE IF EXISTS _dedup_norms")
+    conn.execute(
+        """
+        CREATE TEMP TABLE _dedup_norms AS
+        SELECT regexp_replace(lower(display_name), '[^a-z0-9]', '', 'g') AS norm,
+               min(id::text)::uuid AS artist_id, count(*) AS n
+        FROM artist GROUP BY 1
+        """
+    )
+    conn.execute("CREATE INDEX ON _dedup_norms (norm)")
+    matched = conn.execute(
+        """
+        SELECT c.id, c.platform_id, c.band_name, d.artist_id
+        FROM bc_candidate c
+        JOIN _dedup_norms d
+          ON d.norm = regexp_replace(lower(c.band_name), '[^a-z0-9]', '', 'g')
+         AND d.n = 1 AND d.norm != ''
+        WHERE c.status = 'candidate'
+          AND coalesce(c.status_reason, '') != 'label_roster'
+        LIMIT %s
+        """,
+        (limit,),
     ).fetchall()
-    for cid, pid, name, src_reason in rows:
-        banned = conn.execute(
-            # pid bans match by pid; NAME bans apply only to ledger rows
-            # WITHOUT pids (deliberate name-bans) — a new band sharing a
-            # banned artist's name is not collateral (review finding)
-            """SELECT 1 FROM ban_ledger WHERE platform_ids @> %s
-               OR (platform_ids = '[]'::jsonb AND lower(display_name) = lower(%s))""",
-            (f'["bandcamp:{pid}"]', name),
-        ).fetchone()
-        if banned:
-            conn.execute(
-                "UPDATE bc_candidate SET status = 'rejected', status_reason = 'banned' WHERE id = %s",
-                (cid,))
-            continue
-        known = conn.execute(
-            "SELECT artist_id FROM platform_identity WHERE platform = 'bandcamp' AND platform_id = %s",
-            (pid,),
-        ).fetchone()
-        if known:
-            conn.execute(
-                "UPDATE bc_candidate SET status = 'dedup_existing', status_reason = 'identity', "
-                "artist_id = %s WHERE id = %s", (known[0], cid))
-            out["identity"] += 1
-            continue
-        if src_reason == "label_roster":
-            # label rosters carry SUBDOMAINS as names — the name tier would
-            # wrong-merge slug collisions ('silverapples' → Silver Apples).
-            # Identity-tier only; they admit provisionally (review finding).
-            continue
-        norm = _sql_norm(name)
-        matches = conn.execute(
+    for cid, pid, _name, owner in matched:
+        landed = conn.execute(
             """
-            SELECT a.id FROM artist a
-            WHERE regexp_replace(lower(a.display_name), '[^a-z0-9]', '', 'g') = %s
-               OR (a.mbid IS NOT NULL AND EXISTS (
-                     SELECT 1 FROM mb_raw.artist ma
-                     JOIN mb_raw.artist_alias al ON al.artist = ma.id
-                     WHERE ma.gid = a.mbid
-                       AND regexp_replace(lower(al.name), '[^a-z0-9]', '', 'g') = %s))
-            LIMIT 2
+            INSERT INTO platform_identity (artist_id, platform, platform_id, vanity_url, page_type)
+            VALUES (%s, 'bandcamp', %s, %s, 'artist')
+            ON CONFLICT DO NOTHING RETURNING id
             """,
-            (norm, norm),
-        ).fetchall()
-        if len(matches) == 1:
-            # exact-unique → this is OUR artist on a new platform: hand the
-            # identity to the EXISTING row (a binding, not a discovery)
-            landed = conn.execute(
-                """
-                INSERT INTO platform_identity (artist_id, platform, platform_id, vanity_url, page_type)
-                VALUES (%s, 'bandcamp', %s, %s, 'artist')
-                ON CONFLICT DO NOTHING
-                RETURNING id
-                """,
-                (matches[0][0], pid, f"https://{pid}.bandcamp.com"),
-            ).fetchone()
-            owner = matches[0][0] if landed else conn.execute(
-                "SELECT artist_id FROM platform_identity WHERE platform='bandcamp' AND platform_id=%s",
-                (pid,),
-            ).fetchone()[0]  # concurrent binder won the race — record THE truth
-            conn.execute(
-                "UPDATE bc_candidate SET status = 'dedup_existing', status_reason = 'name_unique', "
-                "artist_id = %s WHERE id = %s", (owner, cid))
-            out["name"] += 1
-        # multi-match or no match → stays 'candidate' (a multi-match here is
-        # a NEW band sharing a name — provisional identity disambiguates)
+            (owner, pid, f"https://{pid}.bandcamp.com"),
+        ).fetchone()
+        final_owner = owner if landed else conn.execute(
+            "SELECT artist_id FROM platform_identity WHERE platform='bandcamp' AND platform_id=%s",
+            (pid,),
+        ).fetchone()[0]
+        conn.execute(
+            "UPDATE bc_candidate SET status = 'dedup_existing', status_reason = 'name_unique', "
+            "artist_id = %s WHERE id = %s", (final_owner, cid))
+        out["name"] += 1
+    conn.execute("DROP TABLE IF EXISTS _dedup_norms")
     return out
 
 
