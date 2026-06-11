@@ -113,3 +113,29 @@ def test_tags_use_calibrated_positive_z_only(conn):
     tags = artist_tags(conn, a)
     assert "zz-pub-genre" in tags  # 0.9 is far above the corpus mean → positive z
     assert "zz-pub-weak" not in tags  # 0.1 is far below → negative z, excluded
+
+
+def test_publish_mbid_null_then_loop_close(conn):
+    """ADR-019's whole identity lifecycle in one test: provisional publish
+    (app row id = factory id), then the mbid attaches (sync), then
+    re-publish must UPDATE the same row — not duplicate it (critical
+    review finding)."""
+    _serving_schema(conn)
+    a = conn.execute(
+        "INSERT INTO artist (display_name, mbid, embedding_source) "
+        "VALUES ('Loop Closer', NULL, 'bandcamp') RETURNING id").fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
+        "VALUES (%s, 'mock-model', 2, '[1,0]', 3, 0.5)", (a,))
+    assert publish_artists(conn, conn, limit=10) >= 1
+    row1 = conn.execute("SELECT id, slug, mbid FROM artists WHERE name = 'Loop Closer'").fetchone()
+    assert str(row1[0]) == str(a) and row1[1] == 'loop-closer' and row1[2] is None
+    # the MB loop closes: sync attaches an mbid to the FACTORY row
+    new_mbid = '00000000-feed-4bad-9bad-000000000fc9'
+    conn.execute("UPDATE artist SET mbid = %s WHERE id = %s", (new_mbid, a))
+    assert publish_artists(conn, conn, limit=10) >= 1
+    rows = conn.execute("SELECT id, slug, mbid FROM artists WHERE name = 'Loop Closer'").fetchall()
+    assert len(rows) == 1, "loop close must not duplicate the app row"
+    assert str(rows[0][0]) == str(a)          # same row, same id
+    assert rows[0][1] == 'loop-closer'        # slug stable
+    assert rows[0][2] == new_mbid             # identity upgraded in place
