@@ -127,7 +127,7 @@ async def _heartbeat_loop(settings: Settings, role: str, queues: str) -> None:
             if _gc_counter % 120 == 1:  # hourly; first pass at startup
                 from pipeline.staging import clean_stale_stage
 
-                removed = await asyncio.to_thread(clean_stale_stage, 24.0)
+                removed = await asyncio.to_thread(clean_stale_stage, 6.0)  # prep-to-embed gap is minutes; 6h sweeps termination orphans same-day
                 if removed:
                     logger.info("stage GC: removed %d orphaned dirs", removed)
         await asyncio.sleep(30)
