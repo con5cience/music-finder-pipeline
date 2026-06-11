@@ -51,9 +51,9 @@ def test_discover_stores_yt_scheme_candidates(conn):
     assert [r[1] for r in rows] == [212, 300]
     assert rows[0][2]["watch_url"].endswith("zzvid-song1")
     assert rows[0][2]["experimental"] is True
-    # the wall holds: NULL audio_url can never reach the embed path
-    assert pending_tracks(conn, str(a), "mock-model") == []
-    assert pending_tracks(conn, str(a), "mock-model", source="youtube") == []
+    # gate open (2026-06-11): yt candidates are embed-eligible, last-resort
+    assert len(pending_tracks(conn, str(a), "mock-model")) == 2
+    assert len(pending_tracks(conn, str(a), "mock-model", source="youtube")) == 2
 
 
 def test_discover_is_idempotent(conn):
