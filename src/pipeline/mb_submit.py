@@ -65,6 +65,8 @@ def consent_url() -> str:
         "response_type": "code", "client_id": cid,
         "redirect_uri": _redirect_uri(),
         "scope": "profile tag",  # only what phase 2 uses (review finding: over-broad consent)
+        "access_type": "offline",  # REQUIRED for a refresh token (MB follows the Google convention)
+        "approval_prompt": "force",  # re-consent re-issues the refresh token
     })
     return f"{MB_BASE}/oauth2/authorize?{q}"
 
