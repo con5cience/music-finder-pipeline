@@ -64,7 +64,7 @@ def resolve_slug(app: Connection, name: str, key: str) -> str:
     return f"{base}-{n}"
 
 
-def publishable_artists(conn: Connection, limit: int, since=None) -> list[tuple]:
+def publishable_artists(conn: Connection, limit: int, since=None, after_id=None) -> list[tuple]:
     """All embedded artists, or — incremental mode — only those whose
     embedding or artist tags changed since the watermark. Banned artists
     never publish (ban_ledger, the do-not-rediscover law)."""
@@ -73,6 +73,7 @@ def publishable_artists(conn: Connection, limit: int, since=None) -> list[tuple]
                OR EXISTS (SELECT 1 FROM artist_tag_scores ats
                           WHERE ats.artist_id = a.id AND ats.computed_at >= %(since)s))
     """ if since is not None else ""
+    after_sql = "AND a.id > %(after_id)s" if after_id is not None else ""
     return conn.execute(
         f"""
         SELECT a.id, a.mbid::text, a.display_name, a.embedding_source,
@@ -83,9 +84,10 @@ def publishable_artists(conn: Connection, limit: int, since=None) -> list[tuple]
           AND NOT EXISTS (SELECT 1 FROM ban_ledger b WHERE b.artist_id = a.id
                           OR (a.mbid IS NOT NULL AND b.mbid = a.mbid))
           {since_sql}
+          {after_sql}
         ORDER BY a.id LIMIT %(limit)s
         """,
-        {"limit": limit, "since": since},
+        {"limit": limit, "since": since, "after_id": after_id},
     ).fetchall()
 
 
@@ -96,13 +98,18 @@ def publish_incremental(factory: Connection, app: Connection, limit: int = 10000
     wm = factory.execute("SELECT last_run FROM publish_watermark WHERE id = 'default'").fetchone()[0]
     # clock_timestamp: wall clock, not txn-frozen now()
     factory.execute("UPDATE publish_watermark SET last_run = clock_timestamp() WHERE id = 'default'")
-    # drain-until-empty (review finding: a single LIMIT window under a big
-    # backlog skipped everyone past the cap forever once the watermark moved)
+    # drain-until-empty via KEYSET pagination (second review catch: without
+    # advancing after_id, the same first window re-published forever)
     n = 0
+    after = None
     while True:
-        batch = publish_artists(factory, app, limit, since=wm)
-        n += batch
-        if batch < limit:
+        rows = publishable_artists(factory, limit, since=wm, after_id=after)
+        if not rows:
+            break
+        publish_rows(factory, app, rows)
+        n += len(rows)
+        after = rows[-1][0]
+        if len(rows) < limit:
             break
     for (aid, mbid) in factory.execute(
         "SELECT artist_id, mbid::text FROM ban_ledger WHERE banned_at >= %s", (wm,)
@@ -165,25 +172,27 @@ def artist_urls(conn: Connection, artist_id) -> dict[str, str]:
     return out
 
 
-def artist_tags(conn: Connection, artist_id) -> dict[str, int]:
+def artist_tags(conn: Connection, artist_id, g_moments=None) -> dict[str, int]:
     """Calibrated artist-level tags. PRIMARY: artist_tag_scores (scored from
     the artist-mean MuLan vector at embed time — full resolution, no
     per-track-truncation pathology), z-ranked against per-tag corpus moments.
     FALLBACK until the v2 sweep covers an artist: the per-track aggregation
     (coverage-weighted, known-noisy on preview sources)."""
+    if g_moments is None:
+        g_moments = conn.execute(
+            "SELECT avg(score), greatest(stddev(score), 1e-6) FROM artist_tag_scores"
+        ).fetchone()
+    gmean, gsd = (g_moments[0] or 0.0), (g_moments[1] or 1e-6)
     primary = conn.execute(
         """
-        WITH g AS (SELECT avg(score) gmean, greatest(stddev(score), 1e-6) gsd
-                   FROM artist_tag_scores)
         SELECT ats.tag,
-               (ats.score - coalesce(tc.mean, g.gmean)) / coalesce(tc.stddev, g.gsd) AS z
+               (ats.score - coalesce(tc.mean, %s)) / coalesce(tc.stddev, %s) AS z
         FROM artist_tag_scores ats
-        CROSS JOIN g
         LEFT JOIN tag_calibration tc ON tc.tag = ats.tag AND tc.model = ats.model
         WHERE ats.artist_id = %s AND ats.score != 'NaN'::real  -- NaN armor (pg NaN-equality law)
         ORDER BY z DESC LIMIT %s
         """,
-        (artist_id, TAG_K),
+        (gmean, gsd, artist_id, TAG_K),
     ).fetchall()
     if primary:
         return {tag: max(1, round(float(z)) + 1) for tag, z in primary if float(z) > 0}
@@ -214,12 +223,21 @@ def artist_tags(conn: Connection, artist_id) -> dict[str, int]:
 
 def publish_artists(factory: Connection, app: Connection, limit: int = 1000, since=None) -> int:
     """Upsert embedded artists into the serving DB. Returns artists published."""
+    return publish_rows(factory, app, publishable_artists(factory, limit, since))
+
+
+def publish_rows(factory: Connection, app: Connection, rows: list[tuple]) -> int:
     import json
 
+    # global tag moments ONCE per batch (review finding: the per-artist CTE
+    # full-scanned artist_tag_scores for EVERY artist — infeasible at 451k)
+    g_artist = factory.execute(
+        "SELECT avg(score), greatest(stddev(score), 1e-6) FROM artist_tag_scores"
+    ).fetchone()
     published = 0
-    for aid, mbid, name, source, embedding, _model, ratio in publishable_artists(factory, limit, since):
+    for aid, mbid, name, source, embedding, _model, ratio in rows:
         urls = artist_urls(factory, aid)
-        tags = artist_tags(factory, aid)
+        tags = artist_tags(factory, aid, g_moments=g_artist)
         perceptual = artist_perceptual(factory, aid)
         language = artist_language(factory, aid)
         location = artist_location(factory, aid)

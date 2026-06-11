@@ -190,3 +190,23 @@ def test_incremental_publish_watermark_and_bans(conn):
     conn.execute("UPDATE publish_watermark SET last_run = '2026-03-01' WHERE id = 'default'")
     publish_incremental(conn, conn)
     assert conn.execute("SELECT count(*) FROM artists WHERE name = 'Inc One'").fetchone()[0] == 0
+
+
+def test_incremental_drain_advances_keyset(conn):
+    """Second review catch: drain-until-empty must ADVANCE — with
+    changed-set > limit, iterations page by keyset instead of re-publishing
+    the first window forever."""
+    from pipeline.publish import publish_incremental
+
+    _serving_schema(conn)
+    conn.execute("UPDATE publish_watermark SET last_run = 'epoch' WHERE id = 'default'")
+    for i in range(5):
+        a = conn.execute(
+            "INSERT INTO artist (display_name, mbid, embedding_source) VALUES "
+            f"('Drain {i}', '00000000-feed-4bad-9bad-00000000dd{i:02d}', 'deezer') RETURNING id").fetchone()[0]
+        conn.execute(
+            "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
+            "VALUES (%s, 'mock-model', 2, '[1,0]', 3, 1.0)", (a,))
+    n = publish_incremental(conn, conn, limit=2)  # 5 changed, window of 2
+    assert n == 5  # 3 keyset pages, no infinite loop, full drain
+    assert conn.execute("SELECT count(*) FROM artists WHERE name LIKE 'Drain %'").fetchone()[0] == 5
