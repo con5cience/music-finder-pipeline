@@ -64,18 +64,44 @@ def resolve_slug(app: Connection, name: str, key: str) -> str:
     return f"{base}-{n}"
 
 
-def publishable_artists(conn: Connection, limit: int) -> list[tuple]:
+def publishable_artists(conn: Connection, limit: int, since=None) -> list[tuple]:
+    """All embedded artists, or — incremental mode — only those whose
+    embedding or artist tags changed since the watermark. Banned artists
+    never publish (ban_ledger, the do-not-rediscover law)."""
+    since_sql = """
+          AND (ae.computed_at >= %(since)s
+               OR EXISTS (SELECT 1 FROM artist_tag_scores ats
+                          WHERE ats.artist_id = a.id AND ats.computed_at >= %(since)s))
+    """ if since is not None else ""
     return conn.execute(
-        """
+        f"""
         SELECT a.id, a.mbid::text, a.display_name, a.embedding_source,
                ae.embedding::text, ae.model, ae.signal_ratio
         FROM artist a
         JOIN artist_embedding ae ON ae.artist_id = a.id
         WHERE a.embedding_source IS NOT NULL
-        ORDER BY a.id LIMIT %s
+          AND NOT EXISTS (SELECT 1 FROM ban_ledger b WHERE b.artist_id = a.id
+                          OR (a.mbid IS NOT NULL AND b.mbid = a.mbid))
+          {since_sql}
+        ORDER BY a.id LIMIT %(limit)s
         """,
-        (limit,),
+        {"limit": limit, "since": since},
     ).fetchall()
+
+
+def publish_incremental(factory: Connection, app: Connection, limit: int = 100000) -> int:
+    """Hourly-sync mode: advance the watermark FIRST (no lost-update window
+    — anything changing mid-run lands next hour), publish changed artists,
+    and prune app rows for newly banned ones."""
+    wm = factory.execute("SELECT last_run FROM publish_watermark WHERE id = 'default'").fetchone()[0]
+    factory.execute("UPDATE publish_watermark SET last_run = clock_timestamp() WHERE id = 'default'")  # wall clock, not txn-frozen now()
+    n = publish_artists(factory, app, limit, since=wm)
+    for (aid, mbid) in factory.execute(
+        "SELECT artist_id, mbid::text FROM ban_ledger WHERE banned_at >= %s", (wm,)
+    ).fetchall():
+        app.execute("DELETE FROM artists WHERE id = %s OR (mbid IS NOT NULL AND mbid = %s)",
+                    (str(aid) if aid else "00000000-0000-0000-0000-000000000000", mbid))
+    return n
 
 
 def artist_language(conn: Connection, artist_id) -> str | None:
@@ -178,12 +204,12 @@ def artist_tags(conn: Connection, artist_id) -> dict[str, int]:
     return {tag: max(1, round(float(z)) + 1) for tag, z, _r in rows}
 
 
-def publish_artists(factory: Connection, app: Connection, limit: int = 1000) -> int:
+def publish_artists(factory: Connection, app: Connection, limit: int = 1000, since=None) -> int:
     """Upsert embedded artists into the serving DB. Returns artists published."""
     import json
 
     published = 0
-    for aid, mbid, name, source, embedding, _model, ratio in publishable_artists(factory, limit):
+    for aid, mbid, name, source, embedding, _model, ratio in publishable_artists(factory, limit, since):
         urls = artist_urls(factory, aid)
         tags = artist_tags(factory, aid)
         perceptual = artist_perceptual(factory, aid)
@@ -248,12 +274,17 @@ def main() -> None:
 
     ap = argparse.ArgumentParser(description="publish embedded artists to the serving DB")
     ap.add_argument("--limit", type=int, default=1000)
+    ap.add_argument("--incremental", action="store_true", help="watermark mode (the hourly sync)")
     args = ap.parse_args()
     app_dsn = os.environ.get("APP_DATABASE_URL")
     if not app_dsn:
         raise SystemExit("APP_DATABASE_URL not set — publishing is deliberate, no default")
     with psycopg.connect(Settings().database_url) as factory, psycopg.connect(app_dsn) as app:
-        n = publish_artists(factory, app, args.limit)
+        if args.incremental:
+            n = publish_incremental(factory, app, args.limit)
+            factory.commit()
+        else:
+            n = publish_artists(factory, app, args.limit)
         app.commit()
     print(f"published={n}", flush=True)
 

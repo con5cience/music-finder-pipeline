@@ -157,6 +157,15 @@ def dedup_gate(conn: Connection, limit: int = 1000) -> dict:
         "ORDER BY first_seen_at LIMIT %s", (limit,)
     ).fetchall()
     for cid, pid, name in rows:
+        banned = conn.execute(
+            "SELECT 1 FROM ban_ledger WHERE platform_ids @> %s OR lower(display_name) = lower(%s)",
+            (f'["bandcamp:{pid}"]', name),
+        ).fetchone()
+        if banned:
+            conn.execute(
+                "UPDATE bc_candidate SET status = 'rejected', status_reason = 'banned' WHERE id = %s",
+                (cid,))
+            continue
         known = conn.execute(
             "SELECT artist_id FROM platform_identity WHERE platform = 'bandcamp' AND platform_id = %s",
             (pid,),

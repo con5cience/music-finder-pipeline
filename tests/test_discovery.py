@@ -126,3 +126,17 @@ def test_discover_wave_harvests_and_isolates(conn, monkeypatch):
     assert rep["errors"] == 1          # the 500 tag isolated, wave survived
     assert rep["new_candidates"] == 2  # g1 + s1
     assert rep["admitted"] == 1        # budget respected
+
+
+def test_dedup_gate_rejects_banned(conn, monkeypatch):
+    monkeypatch.setenv("PIPELINE_FETCH_CACHE_DIR", "/tmp/test-disc-cache")
+    conn.execute(
+        "INSERT INTO ban_ledger (display_name, platform_ids) VALUES "
+        "('Banned Band', '[\"bandcamp:zz-banned-1\"]')")
+    pages = [{"results": [_item("zz-banned-1", "Banned Band")], "cursor": ""}]
+    crawl_tag(conn, "zz-bantag", pages=1, fetcher=_fake_fetcher(pages))
+    dedup_gate(conn)
+    status, reason = conn.execute(
+        "SELECT status, status_reason FROM bc_candidate WHERE platform_id = 'zz-banned-1'").fetchone()
+    assert status == "rejected" and reason == "banned"
+    assert admit(conn, 10) == 0  # rejected candidates never admit

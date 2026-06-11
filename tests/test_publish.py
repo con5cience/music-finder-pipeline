@@ -141,3 +141,35 @@ def test_publish_mbid_null_then_loop_close(conn):
     assert str(rows[0][0]) == str(a)          # same row, same id
     assert rows[0][1] == 'loop-closer'        # slug stable
     assert rows[0][2] == new_mbid             # identity upgraded in place
+
+
+def test_incremental_publish_watermark_and_bans(conn):
+    """Hourly-sync mode: only changed-since-watermark artists publish; a
+    banned artist is excluded AND pruned from the serving side."""
+    from pipeline.publish import publish_incremental
+
+    _serving_schema(conn)
+    a1 = conn.execute(
+        "INSERT INTO artist (display_name, mbid, embedding_source) VALUES "
+        "('Inc One', '00000000-feed-4bad-9bad-000000000aa1', 'deezer') RETURNING id").fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
+        "VALUES (%s, 'mock-model', 2, '[1,0]', 3, 1.0)", (a1,))
+    assert publish_incremental(conn, conn) == 1     # first run: everything is new
+    assert publish_incremental(conn, conn) == 0     # nothing changed since watermark
+    # a new artist arrives → only IT publishes
+    a2 = conn.execute(
+        "INSERT INTO artist (display_name, mbid, embedding_source) VALUES "
+        "('Inc Two', '00000000-feed-4bad-9bad-000000000aa2', 'deezer') RETURNING id").fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
+        "VALUES (%s, 'mock-model', 2, '[0,1]', 3, 1.0)", (a2,))
+    assert publish_incremental(conn, conn) == 1
+    # ban a1 → next sync prunes the serving row and never re-publishes
+    conn.execute(
+        "INSERT INTO ban_ledger (artist_id, mbid, display_name) VALUES (%s, %s, 'Inc One')",
+        (a1, "00000000-feed-4bad-9bad-000000000aa1"))
+    conn.execute("UPDATE artist_embedding SET computed_at = now() WHERE artist_id = %s", (a1,))
+    assert publish_incremental(conn, conn) == 0     # banned: excluded despite the change
+    assert conn.execute("SELECT count(*) FROM artists WHERE name = 'Inc One'").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM artists WHERE name = 'Inc Two'").fetchone()[0] == 1

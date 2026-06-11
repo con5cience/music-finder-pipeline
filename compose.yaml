@@ -133,6 +133,24 @@ services:
       - factory-db
       - temporal
 
+  # Hourly serving-DB sync (the FIRST standing automation — user-amended
+  # the one-shot law for publish on 2026-06-11). Incremental: watermark
+  # mode publishes only changed artists; prunes newly banned ones.
+  publish-sync:
+    build: .
+    image: music-finder-pipeline:local
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["while true; do .venv/bin/python -m pipeline.publish --incremental --limit 100000; sleep 3600; done"]
+    env_file: .env
+    environment:
+      PIPELINE_DATABASE_URL: postgresql://pipeline:pipeline@factory-db:5432/pipeline
+      APP_DATABASE_URL: postgresql://musicfinder:musicfinder@host.docker.internal:5433/musicfinder
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - factory-db
+
 networks:
   factory:
     name: music-factory
