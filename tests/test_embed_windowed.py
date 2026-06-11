@@ -213,7 +213,8 @@ def test_fetch_audio_yt_scheme(monkeypatch, tmp_path):
 
         def extract_info(self, url, download=True):
             calls["url"] = url
-            (tmp_path / "yt-vid123.m4a").write_bytes(b"x")
+            # the FFmpegExtractAudio postprocessor leaves only the wav
+            (tmp_path / "yt-vid123.wav").write_bytes(b"x")
             return {"ext": "m4a"}
 
     import sys
@@ -223,7 +224,7 @@ def test_fetch_audio_yt_scheme(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "yt_dlp", fake)
     monkeypatch.setattr(embed_job, "_YT_MIN_INTERVAL", 0.0)  # no politeness sleep in tests
     out = fetch_audio("yt:vid123", tmp_path)
-    assert out.endswith("yt-vid123.m4a")
+    assert out.endswith("yt-vid123.wav")  # m4a is undecodable; wav is the contract
     assert calls["url"] == "https://www.youtube.com/watch?v=vid123"
     assert calls["opts"]["noplaylist"] is True
 

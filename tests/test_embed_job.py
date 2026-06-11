@@ -204,3 +204,39 @@ def test_unrefreshable_track_is_skipped_not_poisonous(conn):
     assert [r[0] for r in rows] == [t_ok]
     # the dead track stays pending for a later pass (no clip row, not rejected)
     assert len(pending_tracks(conn, a, "mock-model")) == 1
+
+
+def test_yt_fetch_transcodes_to_wav(tmp_path, monkeypatch):
+    """yt-dlp must request the FFmpegExtractAudio→wav postprocessor and the
+    fetch must return the .wav path. The 2026-06-11 lesson: libsndfile cannot
+    decode m4a AT ALL, so a raw bestaudio[ext=m4a] download burned a governed
+    8-15s fetch and then failed prep with 'Format not recognised' — for every
+    single youtube artist."""
+    import yt_dlp
+
+    from pipeline.embed_job import fetch_audio
+
+    monkeypatch.setattr("pipeline.embed_job._YT_MIN_INTERVAL", 0.0)
+    captured = {}
+
+    class FakeYDL:
+        def __init__(self, opts):
+            captured.update(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def extract_info(self, url, download):
+            # the postprocessor leaves ONLY the transcoded wav behind
+            (tmp_path / "yt-vid123.wav").write_bytes(b"RIFFfake")
+            return {"ext": "m4a"}
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+    path = fetch_audio("yt:vid123", tmp_path)
+    assert path.endswith("yt-vid123.wav")
+    assert Path(path).exists()
+    pps = captured.get("postprocessors") or []
+    assert any(p.get("key") == "FFmpegExtractAudio" and p.get("preferredcodec") == "wav" for p in pps)

@@ -116,12 +116,17 @@ def _fetch_youtube(video_id: str, workdir: Path) -> str:
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True,
+            # libsndfile cannot decode m4a/AAC AT ALL — a raw download burned
+            # a governed fetch then failed prep with 'Format not recognised'
+            # for every yt artist. ffmpeg (in the image) transcodes to wav,
+            # which the whole decode path reads natively.
+            "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "wav"}],
         }
         try:
             with yt_dlp.YoutubeDL(opts) as y:
-                info = y.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
+                y.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
             _YT_LAST[0] = time.time()
-            return str(workdir / f"yt-{video_id}.{info['ext']}")
+            return str(workdir / f"yt-{video_id}.wav")
         except yt_dlp.utils.DownloadError as e:
             _YT_LAST[0] = time.time()
             raise AudioFetchError(f"yt extraction failed for {video_id}: {e}") from e

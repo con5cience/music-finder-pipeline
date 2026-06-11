@@ -5,9 +5,10 @@
 FROM python:3.12-slim
 
 # libsndfile: decode (mp3 support needs >=1.1); libchromaprint: fingerprint
-# head (loaded via ctypes); ca-certs for CDN fetches.
+# head (loaded via ctypes); ca-certs for CDN fetches; ffmpeg: yt-dlp's
+# m4a→wav postprocessor (libsndfile cannot decode m4a — 2026-06-11 lesson).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libsndfile1 libchromaprint1 ca-certificates \
+    libsndfile1 libchromaprint1 ca-certificates ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
