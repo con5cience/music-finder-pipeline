@@ -121,7 +121,7 @@ def artist_tags(conn: Connection, artist_id) -> dict[str, int]:
         FROM artist_tag_scores ats
         CROSS JOIN g
         LEFT JOIN tag_calibration tc ON tc.tag = ats.tag AND tc.model = ats.model
-        WHERE ats.artist_id = %s AND ats.score = ats.score  -- NaN armor
+        WHERE ats.artist_id = %s AND ats.score != 'NaN'::real  -- NaN armor (pg NaN-equality law)
         ORDER BY z DESC LIMIT %s
         """,
         (artist_id, TAG_K),
@@ -141,7 +141,7 @@ def artist_tags(conn: Connection, artist_id) -> dict[str, int]:
             JOIN audio_track t ON t.id = tts.track_id
             CROSS JOIN g
             LEFT JOIN tag_calibration tc ON tc.tag = tts.tag AND tc.model = tts.model
-            WHERE t.artist_id = %s AND tts.score = tts.score  -- NaN armor (broken-era rows)
+            WHERE t.artist_id = %s AND tts.score != 'NaN'::real  -- NaN armor (pg law: NaN = NaN is TRUE; x=x can't detect it)
             GROUP BY tts.tag
         )
         SELECT tag, mz, mz * sqrt(cnt) AS ranked
