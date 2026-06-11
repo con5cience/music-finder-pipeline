@@ -107,7 +107,10 @@ def main() -> None:
     ap.add_argument("--work-dir", default="/tmp/mb-sync")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--force", action="store_true", help="re-run an already-applied serial")
-    args = ap.parse_args()
+    import sys
+
+    argv = [a for i, a in enumerate(sys.argv[1:]) if not (a == "--" and i == 0)]
+    args = ap.parse_args(argv)
     with psycopg.connect(Settings().database_url) as conn:
         report = sync(conn, Path(args.work_dir), apply=args.apply, force=args.force)
         conn.commit()

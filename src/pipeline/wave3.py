@@ -276,7 +276,10 @@ def main() -> None:
     ap.add_argument("--artist", default=None)
     ap.add_argument("--head", default="structure", choices=sorted(_HEADS))
     ap.add_argument("--published", action="store_true", help="published artists only (locked rollout policy)")
-    args = ap.parse_args()
+    import sys
+
+    argv = [a for i, a in enumerate(sys.argv[1:]) if not (a == "--" and i == 0)]
+    args = ap.parse_args(argv)
     with psycopg.connect(Settings().database_url) as conn:
         report = run_wave3(conn, args.limit, args.artist, args.head, published_only=args.published)
         conn.commit()

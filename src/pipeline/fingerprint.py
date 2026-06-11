@@ -182,7 +182,10 @@ def main() -> None:
     ap.add_argument("--artist-dups", action="store_true", help="per-artist near-dup report")
     ap.add_argument("--cross-artist", action="store_true", help="file binding-error reviews")
     ap.add_argument("--limit", type=int, default=200)
-    args = ap.parse_args()
+    import sys
+
+    argv = [a for i, a in enumerate(sys.argv[1:]) if not (a == "--" and i == 0)]
+    args = ap.parse_args(argv)
     with psycopg.connect(Settings().database_url) as conn:
         if args.cross_artist:
             n = match_cross_artist(conn)

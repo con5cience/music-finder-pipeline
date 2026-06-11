@@ -193,7 +193,10 @@ def main() -> None:
     ap.add_argument("--tags", default="", help="comma-separated tag list to crawl")
     ap.add_argument("--pages", type=int, default=2)
     ap.add_argument("--admit", type=int, default=0, help="trickle valve: admit N oldest candidates")
-    args = ap.parse_args()
+    import sys
+
+    argv = [a for i, a in enumerate(sys.argv[1:]) if not (a == "--" and i == 0)]
+    args = ap.parse_args(argv)
     report: dict = {"crawl": [], "dedup": None, "admitted": 0}
     with psycopg.connect(Settings().database_url) as conn:
         for tag in [t.strip() for t in args.tags.split(",") if t.strip()]:

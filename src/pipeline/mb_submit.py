@@ -194,7 +194,10 @@ def main() -> None:
     ap.add_argument("--code", help="exchange the consent code for a refresh token")
     ap.add_argument("--queue", type=int, default=0, help="queue N eligible artists for spot-check")
     ap.add_argument("--submit-tags", type=int, default=0, help="phase-2: submit tags for N mbid artists")
-    args = ap.parse_args()
+    import sys
+
+    argv = [a for i, a in enumerate(sys.argv[1:]) if not (a == "--" and i == 0)]
+    args = ap.parse_args(argv)
     if args.consent:
         print(consent_url())
         return

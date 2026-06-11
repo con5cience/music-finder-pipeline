@@ -199,7 +199,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="ADR-018 MB refresh (dry-run by default)")
     ap.add_argument("--dir", required=True)
     ap.add_argument("--apply", action="store_true")
-    args = ap.parse_args()
+    import sys
+
+    argv = [a for i, a in enumerate(sys.argv[1:]) if not (a == "--" and i == 0)]
+    args = ap.parse_args(argv)
     with psycopg.connect(Settings().database_url) as conn:
         report = run_refresh(conn, args.dir, apply=args.apply)
         conn.commit()
