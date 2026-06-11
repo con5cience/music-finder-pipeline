@@ -7,7 +7,7 @@ the latest videos WITH durations in one request per channel. A sampled music
 channel had 14/15 videos inside the 2-8 minute band — the duration filter is
 a real music-vs-noise separator.
 
-Safety is double-walled: rows are stored with audio_url=NULL, so they can
+Gate history: pre-2026-06-11 rows stored audio_url=NULL so they could
 NEVER enter the embed path (pending_tracks requires a URL) — independent of
 the floor=None wall. The watch URL + duration live in evidence; actual audio
 extraction (ToS-gray, yt-dlp streams) stays design-gated for a future slice
@@ -66,7 +66,8 @@ def music_band(entries: list[dict]) -> list[dict]:
 
 
 def discover_youtube(conn: Connection, artist_id: str, channel_id: str, *, fetcher=None) -> int:
-    """Store in-band videos as UNEMBEDDABLE candidate tracks (audio_url NULL).
+    """Store in-band videos as EMBEDDABLE candidates (audio_url = yt:<id>;
+    the extraction gate opened 2026-06-11 — fetch_audio handles the scheme).
     Returns NEW rows written (the scan verdict's yield)."""
     identity_id = identity_row(conn, "youtube", artist_id, channel_id)
     entries = (fetcher or fetch_channel_videos)(channel_id)
@@ -86,11 +87,11 @@ def discover_youtube(conn: Connection, artist_id: str, channel_id: str, *, fetch
             """
             INSERT INTO audio_track (artist_id, platform, platform_track_id, audio_url, duration_s,
                                      from_identity_id, binding_tier, binding_evidence, verification_status)
-            VALUES (%s, 'youtube', %s, NULL, %s, %s, 'A', %s, 'verified')
+            VALUES (%s, 'youtube', %s, %s, %s, %s, 'A', %s, 'verified')
             ON CONFLICT (platform, platform_track_id) DO NOTHING
             RETURNING id
             """,
-            (artist_id, str(e["id"]), int(e["duration"]), identity_id, json.dumps(evidence)),
+            (artist_id, str(e["id"]), f"yt:{e['id']}", int(e["duration"]), identity_id, json.dumps(evidence)),
         ).fetchone()
         if row is not None:
             written += 1

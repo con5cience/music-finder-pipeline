@@ -87,11 +87,54 @@ def _audio_ext(head: bytes) -> str | None:
     return None
 
 
+_YT_LOCK = __import__("threading").Lock()
+_YT_LAST = [0.0]
+_YT_MIN_INTERVAL = 8.0  # legacy-lore cadence: slow + jittered, NEVER bursty
+
+
+def _fetch_youtube(video_id: str, workdir: Path) -> str:
+    """yt: extraction — the 2026-06-11 gate opening. Serialized process-wide
+    with jittered spacing so prep's 12-way concurrency cannot turn the lane
+    into a bot-detection signature. PIPELINE_YT_EXTRACTION=0 aborts cleanly
+    (tracks stay pending — the kill switch never poisons verdicts)."""
+    import os
+    import random
+    import time
+
+    if os.environ.get("PIPELINE_YT_EXTRACTION", "1") == "0":
+        raise AudioFetchError("yt extraction disabled (PIPELINE_YT_EXTRACTION=0)")
+    import yt_dlp
+
+    with _YT_LOCK:
+        wait = _YT_MIN_INTERVAL + random.uniform(0, 7) - (time.time() - _YT_LAST[0])
+        if wait > 0:
+            time.sleep(wait)
+        out = str(workdir / f"yt-{video_id}.%(ext)s")
+        opts = {
+            "format": "bestaudio[ext=m4a]/bestaudio",
+            "outtmpl": out,
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+        }
+        try:
+            with yt_dlp.YoutubeDL(opts) as y:
+                info = y.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
+            _YT_LAST[0] = time.time()
+            return str(workdir / f"yt-{video_id}.{info['ext']}")
+        except yt_dlp.utils.DownloadError as e:
+            _YT_LAST[0] = time.time()
+            raise AudioFetchError(f"yt extraction failed for {video_id}: {e}") from e
+
+
 def fetch_audio(url: str, workdir: Path) -> str:
     """Materialize a track's audio locally. http(s) URLs download (real UA,
     status-checked, content-sniffed — signed CDN URLs come in shifting formats
-    and some variants reject library UAs); anything else is treated as an
-    already-local path (box-local files, tests)."""
+    and some variants reject library UAs); yt:<video_id> extracts via the
+    governed yt-dlp lane; anything else is treated as an already-local path
+    (box-local files, tests)."""
+    if url.startswith("yt:"):
+        return _fetch_youtube(url[3:], workdir)
     if not url.startswith(("http://", "https://")):
         return url
     req = urllib.request.Request(url, headers={"User-Agent": _UA})

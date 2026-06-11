@@ -73,10 +73,12 @@ def test_bandcamp_below_floor_loses_to_deezer_at_floor():
     assert choose_source({"deezer": 10, "bandcamp": 2})[0] == "deezer"
 
 
-def test_experimental_source_never_chosen():
-    # youtube floor is None: scanned, recorded, never auto-embedded
-    assert floor_ratio("youtube", 50) is None
-    assert choose_source({"youtube": 50}) is None
+def test_youtube_is_the_last_resort():
+    # GATE OPENED 2026-06-11: youtube floor 4 — chosen only when every
+    # higher-priority source failed its floor
+    assert floor_ratio("youtube", 4) == 1.0
+    assert choose_source({"deezer": 12, "youtube": 50})[0] == "deezer"
+    assert choose_source({"youtube": 6})[0] == "youtube"
 
 
 def test_nothing_anywhere_is_none():

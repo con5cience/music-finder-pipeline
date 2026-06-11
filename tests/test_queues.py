@@ -83,7 +83,9 @@ def test_audio_platforms_have_coherent_descriptors():
             # also refresh (signed URLs rot everywhere we fetch audio).
             # Experimental (floor None) stores audio_url=NULL — nothing rots.
             if p.discovery_activity and p.floor is not None:
-                assert p.refresher, f"{p.name}: discovery without a refresher"
+                assert p.refresher or p.stable_audio_urls, (
+                f"{p.name}: floored platform needs a refresher or a stable url scheme"
+            )
         else:
             assert p.name not in EMBED_PRIORITY  # playback/identity assets never cascade
 

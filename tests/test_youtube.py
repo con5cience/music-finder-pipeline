@@ -38,7 +38,7 @@ def test_music_band_filter():
     assert all(MIN_S <= e["duration"] <= MAX_S for e in band)
 
 
-def test_discover_stores_unembeddable_candidates(conn):
+def test_discover_stores_yt_scheme_candidates(conn):
     a = _artist(conn)
     _identity(conn, a)
     n = discover_youtube(conn, str(a), "UCzzfixture0000000000000", fetcher=lambda cid: ENTRIES)
@@ -47,7 +47,7 @@ def test_discover_stores_unembeddable_candidates(conn):
         "SELECT audio_url, duration_s, binding_evidence FROM audio_track "
         "WHERE artist_id = %s ORDER BY (binding_evidence->>'track_index')::int", (a,),
     ).fetchall()
-    assert all(r[0] is None for r in rows)            # THE safety wall
+    assert all(r[0] and r[0].startswith("yt:") for r in rows)  # gate open: yt: scheme, governed extraction
     assert [r[1] for r in rows] == [212, 300]
     assert rows[0][2]["watch_url"].endswith("zzvid-song1")
     assert rows[0][2]["experimental"] is True

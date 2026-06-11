@@ -36,6 +36,9 @@ class PlatformSource:
     windowed: bool = False             # full tracks → RMS-peak windows
     discovery_activity: str | None = None  # activity name (string: sandbox-safe dispatch)
     refresher: str | None = None           # "module:function" for expired audio URLs
+    # yt:-style scheme URLs never rot (the id IS the address; extraction
+    # resolves fresh each time) — such platforms need no refresher.
+    stable_audio_urls: bool = False
     # Concurrency cap is ORTHOGONAL to the per-second budget (mined from the
     # old fleet): rate caps schedule starts; this bounds simultaneous
     # in-flight fetches per platform (slow responses pile up otherwise).
@@ -73,8 +76,14 @@ PLATFORMS: dict[str, PlatformSource] = {
     # Discovery stores audio_url=NULL candidates (2-8min band) — extraction
     # is design-gated. No refresher: nothing fetchable to refresh.
     "youtube": PlatformSource(
-        "youtube", 0.1, io_concurrency=1, audio_priority=4, floor=None, windowed=True,
-        discovery_activity="discover_youtube_tracks",
+        # GATE OPENED 2026-06-11 (user decision): floor None → 4. YT is the
+        # LAST-RESORT audio source — choose_source reaches it only when
+        # deezer/bandcamp/soundcloud all failed their floors. Extraction
+        # politeness lives in fetch_audio's yt: governor (serialized,
+        # jittered — the legacy-fleet lore cadence); kill switch
+        # PIPELINE_YT_EXTRACTION=0.
+        "youtube", 0.1, io_concurrency=1, audio_priority=4, floor=4, windowed=True,
+        discovery_activity="discover_youtube_tracks", stable_audio_urls=True,
     ),
     # Community-confirmed ≈0.2/s; playback/URL asset only — never audio.
     "tidal": PlatformSource("tidal", 0.2),

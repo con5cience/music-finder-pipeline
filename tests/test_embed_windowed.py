@@ -190,3 +190,56 @@ def test_preview_platform_respects_track_budget(conn, tmp_path):
         "ORDER BY 1 DESC LIMIT 1", (a,),
     ).fetchone()[0]
     assert newest == PREVIEW_TRACKS_CAP - 1  # newest-first selection, not random
+
+
+def test_fetch_audio_yt_scheme(monkeypatch, tmp_path):
+    """The 2026-06-11 gate: yt:<id> routes through the governed extractor;
+    the kill switch raises AudioFetchError (track stays pending, never a
+    poisoned verdict)."""
+    from pipeline import embed_job
+    from pipeline.embed_job import AudioFetchError, fetch_audio
+
+    calls = {}
+
+    class FakeYDL:
+        def __init__(self, opts):
+            calls["opts"] = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def extract_info(self, url, download=True):
+            calls["url"] = url
+            (tmp_path / "yt-vid123.m4a").write_bytes(b"x")
+            return {"ext": "m4a"}
+
+    import sys
+    import types
+
+    fake = types.SimpleNamespace(YoutubeDL=FakeYDL, utils=types.SimpleNamespace(DownloadError=Exception))
+    monkeypatch.setitem(sys.modules, "yt_dlp", fake)
+    monkeypatch.setattr(embed_job, "_YT_MIN_INTERVAL", 0.0)  # no politeness sleep in tests
+    out = fetch_audio("yt:vid123", tmp_path)
+    assert out.endswith("yt-vid123.m4a")
+    assert calls["url"] == "https://www.youtube.com/watch?v=vid123"
+    assert calls["opts"]["noplaylist"] is True
+
+    monkeypatch.setenv("PIPELINE_YT_EXTRACTION", "0")
+    import pytest
+
+    with pytest.raises(AudioFetchError, match="disabled"):
+        fetch_audio("yt:vid999", tmp_path)
+
+
+def test_youtube_floor_open():
+    from pipeline.cascade import choose_source
+    from pipeline.queues import PLATFORMS
+
+    assert PLATFORMS["youtube"].floor == 4
+    # last resort: yt only wins when everything above fails its floor
+    assert choose_source({"deezer": 12, "youtube": 9})[0] == "deezer"
+    choice = choose_source({"deezer": 1, "bandcamp": 0, "soundcloud": 2, "youtube": 6})
+    assert choice[0] == "youtube" and choice[1] >= 1

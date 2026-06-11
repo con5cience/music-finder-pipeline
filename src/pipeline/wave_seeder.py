@@ -48,7 +48,8 @@ async def run(total: int, batch: int, low_water: int) -> None:
                 SELECT DISTINCT pi.artist_id::text, (a.mbid IS NULL) AS prio
                 FROM platform_identity pi
                 JOIN artist a ON a.id = pi.artist_id
-                WHERE pi.platform IN ('deezer','bandcamp','soundcloud')
+                -- yt gate opened 2026-06-11: +38.5k yt-only artists join the denominator
+                WHERE pi.platform IN ('deezer','bandcamp','soundcloud','youtube')
                   AND pi.scan_status = 'pending'
                   AND a.embedding_source IS NULL
                 ORDER BY prio DESC, 1 LIMIT %s
