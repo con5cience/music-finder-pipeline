@@ -45,12 +45,13 @@ async def run(total: int, batch: int, low_water: int) -> None:
             # corpus-completion; the corpus pays minutes for it.
             rows = [r[0] for r in conn.execute(
                 """
-                SELECT DISTINCT pi.artist_id::text FROM platform_identity pi
+                SELECT DISTINCT pi.artist_id::text, (a.mbid IS NULL) AS prio
+                FROM platform_identity pi
                 JOIN artist a ON a.id = pi.artist_id
                 WHERE pi.platform IN ('deezer','bandcamp','soundcloud')
                   AND pi.scan_status = 'pending'
                   AND a.embedding_source IS NULL
-                ORDER BY (a.mbid IS NULL) DESC, 1 LIMIT %s
+                ORDER BY prio DESC, 1 LIMIT %s
                 """, (min(batch, total - seeded),),
             ).fetchall()]
         if not rows:
