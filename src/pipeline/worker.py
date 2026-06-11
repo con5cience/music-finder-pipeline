@@ -131,9 +131,12 @@ async def _heartbeat_loop(settings: Settings, role: str, queues: str) -> None:
                     # orphan-aware defaults: 48h manifests / 6h incomplete
                     removed = await asyncio.to_thread(clean_stale_stage)
                     if removed:
-                        logger.info("stage GC: removed %d dirs", removed)
+                        print(f"stage GC: removed {removed} dirs", flush=True)
                 except Exception:  # noqa: BLE001
-                    logger.exception("stage GC failed (non-fatal)")
+                    import traceback
+
+                    print("stage GC failed (non-fatal):", flush=True)
+                    traceback.print_exc()
         await asyncio.sleep(30)
 
 
