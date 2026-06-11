@@ -71,8 +71,9 @@ class MulanTagScorer:
         """Top-K (tag, score) for the mean of ALREADY-EMBEDDED window vectors
         (shared-vector path: one MuLan pass serves every consumer)."""
         self._ensure()
-        mean = np.asarray(vecs, dtype=np.float32).mean(axis=0)
-        mean /= np.linalg.norm(mean) + 1e-9
+        mean = np.nan_to_num(np.asarray(vecs, dtype=np.float32)).mean(axis=0)
+        mean /= np.linalg.norm(mean) + 1e-9  # NaN window vectors (zero-norm
+        # clips) poisoned 37k artist tag rows before this guard
         scores = self._vocab_matrix @ mean
         top = np.argsort(scores)[::-1][:top_k]
         return [(self.vocabulary[i], float(scores[i])) for i in top]
