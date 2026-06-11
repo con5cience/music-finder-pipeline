@@ -70,6 +70,30 @@ uv run poe mb-sync -- --apply       # after THREE consecutive clean dry-runs
 - Both-embedded merge conflicts land in the admin Tier-C queue.
 - Every run is ledgered in mb_refresh_run (serial, gates, diff, applied_at).
 
+## The operator's week (the rhythm, not the incidents)
+
+Daily glance (30 seconds): admin /status — Fleet card green, no stall
+beacon, embeds/hr sane (1,400+ during the build), Match Review count not
+exploding. The self-healing watchdog handles zero-rate stalls itself.
+
+Twice a week (~15 min):
+- `uv run poe discover -- --wave --pages 1` then review the candidate haul
+  (`bc_candidate` status counts on the Factory card) and open the valve:
+  `poe discover -- --admit 100` (budget to taste; full analysis is the bar).
+- Thumb through Match Review — bindings first, fp-collisions when curious.
+- `uv run poe mb-submit -- --queue 50` to stage spot-checks; `--submit-tags 20`
+  when the community thread is comfortable.
+
+Weekly:
+- `uv run poe mb-sync` in a quiet bandwidth window (dry-run; --apply after
+  three clean cycles).
+- `uv run poe backup` (and AFTER the corpus: ship a dump offsite).
+- `uv run poe wave3 -- --published --head structure --limit 200` (and stems/
+  asr slices as value proves out).
+
+Hands-off entirely: embedding (the factory), hourly serving sync
+(publish-sync container), stage GC, ban enforcement.
+
 ## Incident playbooks
 
 ### Platform 429s (rate limiting)
