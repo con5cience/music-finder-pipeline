@@ -51,6 +51,30 @@ def test_hit_never_refetches(conn, tmp_path: Path):
     assert len(f.calls) == 1  # the law: never refetch
 
 
+def test_missing_blob_is_a_miss_not_a_crash(conn, tmp_path: Path):
+    """Index row present but blob gone = cache MISS: refetch, rewrite the blob,
+    return live. The 2026-06-11 incident: host-side CLI runs and containerized
+    workers share one DB index but had separate blob stores, so workers found
+    rows whose blobs lived only on the host — FileNotFoundError killed every
+    deezer/bandcamp discovery and the cascade flooded the 0.1/s youtube queue."""
+    f = _fetcher(b"payload-1")
+    r1 = cached_fetch(conn, "deezer", URL, fetcher=f, cache_dir=tmp_path)
+    row = conn.execute("SELECT content_path FROM fetch_cache WHERE url = %s", (URL,)).fetchone()
+    (tmp_path / row[0]).unlink()  # simulate the orphaned index row
+
+    f2 = _fetcher(b"payload-2")
+    r2 = cached_fetch(conn, "deezer", URL, fetcher=f2, cache_dir=tmp_path)
+    assert (r1.from_cache, r2.from_cache) == (False, False)
+    assert r2.body == b"payload-2"
+    assert f2.calls == [URL]  # refetched exactly once
+
+    # and the heal is durable: third read is a clean hit, no fetch
+    f3 = _fetcher(b"never-used")
+    r3 = cached_fetch(conn, "deezer", URL, fetcher=f3, cache_dir=tmp_path)
+    assert (r3.from_cache, r3.body) == (True, b"payload-2")
+    assert f3.calls == []
+
+
 def test_404_is_negative_cached(conn, tmp_path: Path):
     f = _fetcher(b'{"error": "no such artist"}', status=404)
     r1 = cached_fetch(conn, "deezer", URL, fetcher=f, cache_dir=tmp_path)

@@ -97,8 +97,15 @@ def cached_fetch(
     )
     if row is not None:
         status, content_type, content_path = row
-        body = gzip.decompress((cache_dir / content_path).read_bytes())
-        return CachedResponse(status, body, content_type, from_cache=True)
+        try:
+            body = gzip.decompress((cache_dir / content_path).read_bytes())
+            return CachedResponse(status, body, content_type, from_cache=True)
+        except (FileNotFoundError, gzip.BadGzipFile, EOFError):
+            # Orphaned/corrupt index row (blob store and DB index can drift —
+            # e.g. host CLI vs container volume each had their own blob dir
+            # over one shared index, 2026-06-11). Treat as a MISS: fall
+            # through to refetch, which rewrites the blob and heals the row.
+            pass
 
     if post_json is not None and fetcher is None:
         status, content_type, body = _http_post_json(url, post_json)
