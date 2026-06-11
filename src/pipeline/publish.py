@@ -78,6 +78,31 @@ def publishable_artists(conn: Connection, limit: int) -> list[tuple]:
     ).fetchall()
 
 
+def artist_language(conn: Connection, artist_id) -> str | None:
+    """Majority ASR language over the artist's tracks (wave-3, sparse
+    coverage by design — None until the artist has ≥2 agreeing tracks)."""
+    row = conn.execute(
+        """
+        SELECT language, count(*) FROM track_language tl
+        JOIN audio_track t ON t.id = tl.track_id
+        WHERE t.artist_id = %s AND tl.confidence >= 0.6
+        GROUP BY language ORDER BY 2 DESC LIMIT 1
+        """,
+        (artist_id,),
+    ).fetchone()
+    return row[0] if row and row[1] >= 2 else None
+
+
+def artist_location(conn: Connection, artist_id) -> str | None:
+    """Discovered artists carry their Bandcamp profile location (the MB
+    area hint) — published so the product can show WHERE the underground is."""
+    row = conn.execute(
+        "SELECT location FROM bc_candidate WHERE artist_id = %s AND location IS NOT NULL",
+        (artist_id,),
+    ).fetchone()
+    return row[0] if row else None
+
+
 def artist_perceptual(conn: Connection, artist_id) -> dict | None:
     """Wave-2 axis means over the artist's tracks (the scorer's wₚ input)."""
     row = conn.execute(
@@ -141,7 +166,8 @@ def artist_tags(conn: Connection, artist_id) -> dict[str, int]:
             JOIN audio_track t ON t.id = tts.track_id
             CROSS JOIN g
             LEFT JOIN tag_calibration tc ON tc.tag = tts.tag AND tc.model = tts.model
-            WHERE t.artist_id = %s AND tts.score != 'NaN'::real  -- NaN armor (pg law: NaN = NaN is TRUE; x=x can't detect it)
+            WHERE t.artist_id = %s
+              AND tts.score != 'NaN'::real  -- pg law: NaN = NaN is TRUE; x=x can't detect it
             GROUP BY tts.tag
         )
         SELECT tag, mz, mz * sqrt(cnt) AS ranked
@@ -161,6 +187,8 @@ def publish_artists(factory: Connection, app: Connection, limit: int = 1000) -> 
         urls = artist_urls(factory, aid)
         tags = artist_tags(factory, aid)
         perceptual = artist_perceptual(factory, aid)
+        language = artist_language(factory, aid)
+        location = artist_location(factory, aid)
         url_cols = "".join(f", {c} = %s" for c in urls)
         # Identity key (ADR-019): mbid when MB knows them; otherwise the
         # FACTORY artist id IS the app row id — provisional identity that an
@@ -184,9 +212,10 @@ def publish_artists(factory: Connection, app: Connection, limit: int = 1000) -> 
             f"""
             INSERT INTO artists (id, mbid, name, slug, tags, audio_embedding,
                                  signal_ratio, embedding_source, perceptual,
+                                 language, location,
                                  audio_embedding_updated, created_at
                                  {"".join("," + c for c in urls)})
-            VALUES ({id_value}, %s, %s, %s, %s, %s, %s, %s, %s, now(), now()
+            VALUES ({id_value}, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), now()
                     {", %s" * len(urls)})
             {conflict} DO UPDATE SET
                 name = EXCLUDED.name, slug = EXCLUDED.slug, tags = EXCLUDED.tags,
@@ -194,12 +223,15 @@ def publish_artists(factory: Connection, app: Connection, limit: int = 1000) -> 
                 signal_ratio = EXCLUDED.signal_ratio,
                 embedding_source = EXCLUDED.embedding_source,
                 perceptual = EXCLUDED.perceptual,
+                language = coalesce(EXCLUDED.language, artists.language),
+                location = coalesce(EXCLUDED.location, artists.location),
                 audio_embedding_updated = now()
                 {url_cols}
             """,
             ((*(() if mbid else (str(aid),)), mbid, name, resolve_slug(app, name, key),
               json.dumps(tags), embedding,
               ratio, source, json.dumps(perceptual) if perceptual else None,
+              language, location,
               *urls.values(), *urls.values())),
         )
         published += 1

@@ -24,6 +24,8 @@ def _serving_schema(conn):
             signal_ratio real,
             embedding_source text,
             perceptual jsonb,
+            language text,
+            location text,
             audio_embedding_updated timestamptz,
             created_at timestamptz,
             deezer_url text, bandcamp_url text, soundcloud_url text,
