@@ -51,14 +51,52 @@ def _creds() -> tuple[str, str]:
     return cid, sec
 
 
+def _redirect_uri() -> str:
+    """Must EXACTLY match the MB application registration. Default is the
+    out-of-band URN (MB 'installed application' type); web-type apps carry
+    a real callback — set MB_REDIRECT_URI to it (a localhost one is caught
+    automatically by --consent's listener)."""
+    return _env_fallback("MB_REDIRECT_URI") or "urn:ietf:wg:oauth:2.0:oob"
+
+
 def consent_url() -> str:
     cid, _ = _creds()
     q = urllib.parse.urlencode({
         "response_type": "code", "client_id": cid,
-        "redirect_uri": "urn:ietf:wg:oauth:2.0:oob",
+        "redirect_uri": _redirect_uri(),
         "scope": "profile tag",  # only what phase 2 uses (review finding: over-broad consent)
     })
     return f"{MB_BASE}/oauth2/authorize?{q}"
+
+
+def catch_code_locally(port: int) -> str:
+    """One-shot HTTP listener for a localhost redirect URI: prints the URL,
+    waits for MB's redirect, returns the ?code=."""
+    import http.server
+    import urllib.parse as up
+
+    captured: dict = {}
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            q = up.parse_qs(up.urlsplit(self.path).query)
+            captured["code"] = (q.get("code") or [None])[0]
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"<h2>crates: code received — return to the terminal.</h2>")
+
+        def log_message(self, *a):  # silence
+            pass
+
+    with http.server.HTTPServer(("127.0.0.1", port), H) as srv:
+        print(consent_url())
+        print(f"(listening on 127.0.0.1:{port} for the redirect...)", flush=True)
+        while "code" not in captured:
+            srv.handle_request()
+    if not captured["code"]:
+        raise SystemExit("redirect arrived without a code — check the MB app registration")
+    return captured["code"]
 
 
 def exchange_code(conn: Connection, code: str) -> None:
@@ -66,7 +104,7 @@ def exchange_code(conn: Connection, code: str) -> None:
     data = urllib.parse.urlencode({
         "grant_type": "authorization_code", "code": code,
         "client_id": cid, "client_secret": sec,
-        "redirect_uri": "urn:ietf:wg:oauth:2.0:oob",
+        "redirect_uri": _redirect_uri(),
     }).encode()
     req = urllib.request.Request(f"{MB_BASE}/oauth2/token", data=data,
                                  headers={"User-Agent": UA})
@@ -201,7 +239,7 @@ def main() -> None:
 
     import psycopg
 
-    from pipeline.config import Settings
+    from pipeline.config import Settings  # noqa: F401 — used in both branches
 
     ap = argparse.ArgumentParser(description="MB contribution lane (ADR-019)")
     ap.add_argument("--consent", action="store_true", help="print the one-time consent URL")
@@ -213,7 +251,16 @@ def main() -> None:
     argv = [a for i, a in enumerate(sys.argv[1:]) if not (a == "--" and i == 0)]
     args = ap.parse_args(argv)
     if args.consent:
-        print(consent_url())
+        ru = _redirect_uri()
+        host = urllib.parse.urlsplit(ru)
+        if host.scheme in ("http", "https") and host.hostname in ("localhost", "127.0.0.1"):
+            code = catch_code_locally(host.port or 80)
+            with psycopg.connect(Settings().database_url) as conn:
+                exchange_code(conn, code)
+                conn.commit()
+            print("refresh token stored — the lane is armed")
+        else:
+            print(consent_url())
         return
     with psycopg.connect(Settings().database_url) as conn:
         if args.code:
