@@ -215,7 +215,12 @@ def clean_stale_stage(max_age_hours: float = 24.0) -> int:
     cutoff = time.time() - max_age_hours * 3600
     removed = 0
     for d in root.iterdir():
-        if d.is_dir() and d.stat().st_mtime < cutoff:
-            shutil.rmtree(d, ignore_errors=True)
-            removed += 1
+        try:  # the gpu worker deletes dirs CONCURRENTLY (post-commit cleanup) —
+            # a vanishing dir mid-scan is normal, not an error (it killed the
+            # io worker's heartbeat task before this guard existed)
+            if d.is_dir() and d.stat().st_mtime < cutoff:
+                shutil.rmtree(d, ignore_errors=True)
+                removed += 1
+        except OSError:
+            continue
     return removed

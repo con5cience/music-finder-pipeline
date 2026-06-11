@@ -144,10 +144,22 @@ async def main() -> None:
     workers = build_workers(client, settings, args.role)
     queues = ", ".join(w.config()["task_queue"] for w in workers)
     print(f"workers up — role={args.role} queues=[{queues}] device={settings.effective_device}", flush=True)
-    await asyncio.gather(
-        _heartbeat_loop(settings, args.role, queues),
-        *(w.run() for w in workers),
-    )
+    try:
+        await asyncio.gather(
+            _heartbeat_loop(settings, args.role, queues),
+            *(w.run() for w in workers),
+        )
+    except BaseException:
+        # A dead worker/heartbeat task must CRASH THE PROCESS LOUDLY so the
+        # container restart policy recovers it. The default asyncio.run
+        # shutdown hung forever in _cancel_all_tasks (py-spy-diagnosed
+        # incident: GC race killed the heartbeat → silent zombie for hours).
+        import traceback
+
+        traceback.print_exc()
+        import os
+
+        os._exit(1)
 
 
 if __name__ == "__main__":
