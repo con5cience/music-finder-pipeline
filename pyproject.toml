@@ -87,6 +87,7 @@ mb-bootstrap = "python -m pipeline.mb_bootstrap"   # usage: uv run poe mb-bootst
 mb-refresh = "python -m pipeline.mb_refresh"   # ADR-018 monthly refresh (dry-run default)
 mb-sync = "python -m pipeline.mb_sync"   # download latest fullexport + refresh (dry-run default; quiet window!)
 fingerprint = "python -m pipeline.fingerprint"   # dedup matcher (flag-only)
+discover = "python -m pipeline.discovery"   # ADR-019 BC discovery (trickle valve via --admit)
 wave3 = "python -m pipeline.wave3"   # gated heads, selected slices only
 analysis-backfill = "python -m pipeline.backfill_analysis"   # Wave-1 heads over already-embedded tracks
 search-bind = "python -m pipeline.search_bind"   # 3d B-tier binding over unbound artists

@@ -37,21 +37,23 @@ def slug_base(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", folded.casefold()).strip("-") or "artist"
 
 
-def resolve_slug(app: Connection, name: str, mbid: str) -> str:
+def resolve_slug(app: Connection, name: str, key: str) -> str:
     """The app's own slug convention (its migration 031 indexes exactly this):
     clean base for the first holder, base-2/-3/... on homonym collisions.
     Idempotent: a row that already holds a slug in the family keeps it."""
     base = slug_base(name)
     mine = app.execute(
-        "SELECT slug FROM artists WHERE mbid = %s AND (slug = %s OR slug ~ ('^' || %s || '-[0-9]+$'))",
-        (mbid, base, base),
+        "SELECT slug FROM artists WHERE (mbid = %s OR id::text = %s) "
+        "AND (slug = %s OR slug ~ ('^' || %s || '-[0-9]+$'))",
+        (key, key, base, base),
     ).fetchone()
     if mine:
         return mine[0]  # stable across re-publishes
     taken = {
         r[0] for r in app.execute(
-            "SELECT slug FROM artists WHERE (slug = %s OR slug ~ ('^' || %s || '-[0-9]+$')) AND mbid != %s",
-            (base, base, mbid),
+            "SELECT slug FROM artists WHERE (slug = %s OR slug ~ ('^' || %s || '-[0-9]+$')) "
+            "AND coalesce(mbid, '') != %s AND id::text != %s",
+            (base, base, key, key),
         ).fetchall()
     }
     if base not in taken:
@@ -69,7 +71,7 @@ def publishable_artists(conn: Connection, limit: int) -> list[tuple]:
                ae.embedding::text, ae.model, ae.signal_ratio
         FROM artist a
         JOIN artist_embedding ae ON ae.artist_id = a.id
-        WHERE a.embedding_source IS NOT NULL AND a.mbid IS NOT NULL
+        WHERE a.embedding_source IS NOT NULL
         ORDER BY a.id LIMIT %s
         """,
         (limit,),
@@ -160,15 +162,24 @@ def publish_artists(factory: Connection, app: Connection, limit: int = 1000) -> 
         tags = artist_tags(factory, aid)
         perceptual = artist_perceptual(factory, aid)
         url_cols = "".join(f", {c} = %s" for c in urls)
+        # Identity key (ADR-019): mbid when MB knows them; otherwise the
+        # FACTORY artist id IS the app row id — provisional identity that an
+        # accepted MB submission upgrades in place (mbid attaches via sync).
+        if mbid:
+            conflict = "ON CONFLICT (mbid)"
+            id_value, key = "gen_random_uuid()", mbid
+        else:
+            conflict = "ON CONFLICT (id)"
+            id_value, key = "%s", str(aid)
         app.execute(
             f"""
             INSERT INTO artists (id, mbid, name, slug, tags, audio_embedding,
                                  signal_ratio, embedding_source, perceptual,
                                  audio_embedding_updated, created_at
                                  {"".join("," + c for c in urls)})
-            VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s, now(), now()
+            VALUES ({id_value}, %s, %s, %s, %s, %s, %s, %s, %s, now(), now()
                     {", %s" * len(urls)})
-            ON CONFLICT (mbid) DO UPDATE SET
+            {conflict} DO UPDATE SET
                 name = EXCLUDED.name, slug = EXCLUDED.slug, tags = EXCLUDED.tags,
                 audio_embedding = EXCLUDED.audio_embedding,
                 signal_ratio = EXCLUDED.signal_ratio,
@@ -177,9 +188,10 @@ def publish_artists(factory: Connection, app: Connection, limit: int = 1000) -> 
                 audio_embedding_updated = now()
                 {url_cols}
             """,
-            (mbid, name, resolve_slug(app, name, mbid), json.dumps(tags), embedding,
-             ratio, source, json.dumps(perceptual) if perceptual else None,
-             *urls.values(), *urls.values()),
+            ((*(() if mbid else (str(aid),)), mbid, name, resolve_slug(app, name, key),
+              json.dumps(tags), embedding,
+              ratio, source, json.dumps(perceptual) if perceptual else None,
+              *urls.values(), *urls.values())),
         )
         published += 1
     return published
