@@ -29,11 +29,25 @@ MB_BASE = os.environ.get("MB_SUBMIT_BASE", "https://musicbrainz.org")
 UA = "crates.ltd-contributor/0.1 (wstiern@gmail.com)"
 
 
+def _env_fallback(key: str) -> str | None:
+    """os.environ first; else the pipeline .env (pydantic loads it into
+    Settings, not the process env — MB_ keys live outside its prefix)."""
+    if v := os.environ.get(key):
+        return v
+    try:
+        for line in open(".env"):
+            if line.startswith(f"{key}="):
+                return line.split("=", 1)[1].strip()
+    except FileNotFoundError:
+        pass
+    return None
+
+
 def _creds() -> tuple[str, str]:
-    cid = os.environ.get("MB_CLIENT_ID")
-    sec = os.environ.get("MB_CLIENT_SECRET")
+    cid = _env_fallback("MB_CLIENT_ID")
+    sec = _env_fallback("MB_CLIENT_SECRET")
     if not cid or not sec:
-        raise SystemExit("MB_CLIENT_ID / MB_CLIENT_SECRET not set")
+        raise SystemExit("MB_CLIENT_ID / MB_CLIENT_SECRET not set (env or pipeline .env)")
     return cid, sec
 
 
