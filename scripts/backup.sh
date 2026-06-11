@@ -15,11 +15,11 @@ OUT="$DEST/pipeline-$STAMP.dump"
 # a user-run one-shot, never automated).
 if command -v pg_dump >/dev/null; then
   pg_dump --format=custom --compress=6 --no-owner --dbname="$DSN" \
-    --exclude-table-data=fetch_cache --file="$OUT"
+    --exclude-table-data=fetch_cache --exclude-table-data=mb_oauth --file="$OUT"
 else
   sudo docker compose -f "$(dirname "$0")/../compose.yaml" exec -T factory-db \
     pg_dump --format=custom --compress=6 --no-owner -U pipeline -d pipeline \
-    --exclude-table-data=fetch_cache > "$OUT"
+    --exclude-table-data=fetch_cache --exclude-table-data=mb_oauth > "$OUT"
 fi
 ls -t "$DEST"/pipeline-*.dump | tail -n +8 | xargs -r rm --
 echo "backup: $OUT ($(du -h "$OUT" | cut -f1)); kept: $(ls "$DEST"/pipeline-*.dump | wc -l)"

@@ -44,7 +44,11 @@ def crawl_tag(conn: Connection, tag: str, pages: int = 2, *, fetcher=None) -> di
             "slice": "new", "cursor": cursor, "size": PAGE_SIZE,
             "include_result_types": ["a", "s"],
         }
-        r = cached_fetch(conn, "bandcamp", DISCOVER_URL, post_json=payload, fetcher=fetcher)
+        import datetime as _dt
+
+        bucket = _dt.datetime.now(_dt.UTC).date().isoformat()
+        r = cached_fetch(conn, "bandcamp", DISCOVER_URL, post_json=payload,
+                         fetcher=fetcher, cache_bucket=bucket)
         import json
 
         data = json.loads(r.body)
@@ -74,11 +78,18 @@ def crawl_tag(conn: Connection, tag: str, pages: int = 2, *, fetcher=None) -> di
     return {"tag": tag, "seen": seen, "new": new}
 
 
+def _sql_norm(name: str) -> str:
+    """EXACTLY mirrors the SQL regexp_replace(lower(x),'[^a-z0-9]','','g') —
+    deletion-form on BOTH sides is symmetric, so normalization asymmetry
+    can't cause a wrong merge (review finding: NFKD-fold vs deletion
+    disagreed on diacritics). Deletion-collisions ('Deli' vs 'Delić')
+    surface as multi-match → candidate stays provisional, which is safe."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
 def dedup_gate(conn: Connection, limit: int = 1000) -> dict:
     """Mark candidates we already know: bound platform identity, or an
     exact-unique name match (the binding ladder's Tier-B test, reused)."""
-    from pipeline.search_bind import normalize_name
-
     out = {"identity": 0, "name": 0}
     rows = conn.execute(
         "SELECT id, platform_id, band_name FROM bc_candidate WHERE status = 'candidate' "
@@ -95,7 +106,7 @@ def dedup_gate(conn: Connection, limit: int = 1000) -> dict:
                 "artist_id = %s WHERE id = %s", (known[0], cid))
             out["identity"] += 1
             continue
-        norm = normalize_name(name)
+        norm = _sql_norm(name)
         matches = conn.execute(
             """
             SELECT a.id FROM artist a
@@ -112,17 +123,22 @@ def dedup_gate(conn: Connection, limit: int = 1000) -> dict:
         if len(matches) == 1:
             # exact-unique → this is OUR artist on a new platform: hand the
             # identity to the EXISTING row (a binding, not a discovery)
-            conn.execute(
+            landed = conn.execute(
                 """
                 INSERT INTO platform_identity (artist_id, platform, platform_id, vanity_url, page_type)
                 VALUES (%s, 'bandcamp', %s, %s, 'artist')
                 ON CONFLICT DO NOTHING
+                RETURNING id
                 """,
                 (matches[0][0], pid, f"https://{pid}.bandcamp.com"),
-            )
+            ).fetchone()
+            owner = matches[0][0] if landed else conn.execute(
+                "SELECT artist_id FROM platform_identity WHERE platform='bandcamp' AND platform_id=%s",
+                (pid,),
+            ).fetchone()[0]  # concurrent binder won the race — record THE truth
             conn.execute(
                 "UPDATE bc_candidate SET status = 'dedup_existing', status_reason = 'name_unique', "
-                "artist_id = %s WHERE id = %s", (matches[0][0], cid))
+                "artist_id = %s WHERE id = %s", (owner, cid))
             out["name"] += 1
         # multi-match or no match → stays 'candidate' (a multi-match here is
         # a NEW band sharing a name — provisional identity disambiguates)
@@ -142,14 +158,21 @@ def admit(conn: Connection, n: int) -> int:
         aid = conn.execute(
             "INSERT INTO artist (display_name, mbid) VALUES (%s, NULL) RETURNING id", (name,)
         ).fetchone()[0]
-        conn.execute(
+        landed = conn.execute(
             """
             INSERT INTO platform_identity (artist_id, platform, platform_id, vanity_url, page_type)
             VALUES (%s, 'bandcamp', %s, %s, 'artist')
             ON CONFLICT DO NOTHING
+            RETURNING id
             """,
             (aid, pid, url),
-        )
+        ).fetchone()
+        if landed is None:  # concurrent binder claimed this pid — no orphan rows
+            conn.execute("DELETE FROM artist WHERE id = %s", (aid,))
+            conn.execute(
+                "UPDATE bc_candidate SET status = 'dedup_existing', status_reason = 'race' "
+                "WHERE id = %s", (cid,))
+            continue
         conn.execute(
             "UPDATE bc_candidate SET status = 'admitted', artist_id = %s WHERE id = %s",
             (aid, cid),

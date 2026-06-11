@@ -42,7 +42,7 @@ def consent_url() -> str:
     q = urllib.parse.urlencode({
         "response_type": "code", "client_id": cid,
         "redirect_uri": "urn:ietf:wg:oauth:2.0:oob",
-        "scope": "profile tag rating submit_barcode submit_isrc",
+        "scope": "profile tag",  # only what phase 2 uses (review finding: over-broad consent)
     })
     return f"{MB_BASE}/oauth2/authorize?{q}"
 
@@ -75,8 +75,16 @@ def access_token(conn: Connection) -> str:
         "client_id": cid, "client_secret": sec,
     }).encode()
     req = urllib.request.Request(f"{MB_BASE}/oauth2/token", data=data, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read())["access_token"]
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read())["access_token"]
+    except urllib.error.HTTPError as e:
+        detail = e.read()[:200].decode("utf-8", "replace")
+        raise SystemExit(
+            f"MB token refresh failed ({e.code}): {detail}\n"
+            "The refresh token is likely expired/revoked — re-run: "
+            "poe mb-submit -- --consent  (then --code <code>)"
+        ) from e
 
 
 def build_payload(conn: Connection, artist_id) -> dict:
@@ -135,10 +143,13 @@ def submit_tags(conn: Connection, limit: int = 20) -> int:
 
     rows = conn.execute(
         """
-        SELECT a.mbid::text, array_agg(ats.tag ORDER BY ats.score DESC) FROM artist a
-        JOIN artist_tag_scores ats ON ats.artist_id = a.id
+        SELECT a.id, a.mbid::text, array_agg(ats.tag ORDER BY ats.score DESC)
+        FROM artist a
+        JOIN artist_tag_scores ats ON ats.artist_id = a.id AND ats.model = (
+            SELECT model FROM artist_tag_scores LIMIT 1)
         WHERE a.mbid IS NOT NULL AND a.embedding_source IS NOT NULL
-        GROUP BY a.mbid LIMIT %s
+          AND NOT EXISTS (SELECT 1 FROM mb_tag_submission ts WHERE ts.artist_id = a.id)
+        GROUP BY a.id, a.mbid ORDER BY a.id LIMIT %s
         """,
         (limit,),
     ).fetchall()
@@ -147,7 +158,7 @@ def submit_tags(conn: Connection, limit: int = 20) -> int:
     tok = access_token(conn)
     parts = ['<?xml version="1.0" encoding="UTF-8"?>',
              '<metadata xmlns="http://musicbrainz.org/ns/mmd-2.0#"><artist-list>']
-    for mbid, tags in rows:
+    for _aid, mbid, tags in rows:
         parts.append(f'<artist id="{mbid}"><user-tag-list>')
         parts.extend(f"<user-tag><name>{sx.escape(t)}</name></user-tag>" for t in tags[:5])
         parts.append("</user-tag-list></artist>")
@@ -159,8 +170,14 @@ def submit_tags(conn: Connection, limit: int = 20) -> int:
                  "Authorization": f"Bearer {tok}"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=60) as r:
-        r.read()
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            r.read()
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"MB tag submission failed ({e.code}): {e.read()[:200]!r}") from e
+    for aid, _mbid, _tags in rows:
+        conn.execute(
+            "INSERT INTO mb_tag_submission (artist_id) VALUES (%s) ON CONFLICT DO NOTHING", (aid,))
     time.sleep(1.1)  # bot-polite even in batch mode
     return len(rows)
 
@@ -187,6 +204,7 @@ def main() -> None:
             print("refresh token stored")
         if args.queue:
             print(f"queued for spot-check: {queue_eligible(conn, args.queue)}")
+            conn.commit()  # per-phase commit: a tag-lane crash must not roll back queue work
         if args.submit_tags:
             print(f"tag submissions sent: {submit_tags(conn, args.submit_tags)}")
         conn.commit()

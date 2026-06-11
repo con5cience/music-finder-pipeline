@@ -3,8 +3,6 @@ only), consent URL shape, tag-submission XML build (HTTP mocked)."""
 
 from __future__ import annotations
 
-import json
-
 from pipeline.mb_submit import build_payload, consent_url, queue_eligible
 
 MBID = "00000000-feed-4bad-9bad-000000000eb1"

@@ -74,6 +74,7 @@ def cached_fetch(
     cache_dir: Path | str | None = None,
     refresh: bool = False,
     post_json: dict | None = None,
+    cache_bucket: str | None = None,
 ) -> CachedResponse:
     """`refresh=True` skips the cache READ (still writes): for payloads carrying
     expiring signed URLs that must be re-resolved live (Deezer previews)."""
@@ -84,7 +85,8 @@ def cached_fetch(
     cache_key = url
     if post_json is not None:
         body_bytes = json.dumps(post_json, sort_keys=True).encode()
-        cache_key = f"{url}#post:{hashlib.sha256(body_bytes).hexdigest()[:24]}"
+        bucket = f":{cache_bucket}" if cache_bucket else ""
+        cache_key = f"{url}#post:{hashlib.sha256(body_bytes).hexdigest()[:24]}{bucket}"
 
     row = (
         None

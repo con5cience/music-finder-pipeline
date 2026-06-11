@@ -166,6 +166,15 @@ def publish_artists(factory: Connection, app: Connection, limit: int = 1000) -> 
         # FACTORY artist id IS the app row id — provisional identity that an
         # accepted MB submission upgrades in place (mbid attaches via sync).
         if mbid:
+            # ADR-019 loop close (review finding, critical): an artist first
+            # published mbid-NULL has an app row keyed by factory id with
+            # mbid NULL — ON CONFLICT (mbid) would MISS it and insert a
+            # duplicate. Claim the provisional row first; then the conflict
+            # fires and DO UPDATE refreshes in place (id + slug stable).
+            app.execute(
+                "UPDATE artists SET mbid = %s WHERE id = %s AND mbid IS NULL",
+                (mbid, str(aid)),
+            )
             conflict = "ON CONFLICT (mbid)"
             id_value, key = "gen_random_uuid()", mbid
         else:
