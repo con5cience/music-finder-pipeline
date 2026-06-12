@@ -182,6 +182,9 @@ def queue_eligible(conn: Connection, limit: int = 50) -> int:
         JOIN artist a ON a.id = bc.artist_id AND a.embedding_source IS NOT NULL
         WHERE bc.status = 'admitted' AND a.mbid IS NULL
           AND NOT EXISTS (SELECT 1 FROM mb_submission s WHERE s.artist_id = bc.artist_id)
+          -- coherence gate: never submit an acoustically suspect artist to MB
+          AND NOT EXISTS (SELECT 1 FROM review_item ri WHERE ri.subject_id = bc.artist_id
+                          AND ri.reason = 'source_coherence' AND ri.status = 'pending')
         LIMIT %s
         """,
         (limit,),
