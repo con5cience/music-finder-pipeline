@@ -19,13 +19,23 @@ from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
     from pipeline import activities
-    from pipeline.queues import DISCOVERY_ACTIVITIES, EMBED_FLOORS, GPU_QUEUE, PREP_QUEUE, queue_for
+    from pipeline.queues import (
+        DISCOVERY_ACTIVITIES,
+        EMBED_FLOORS,
+        GPU_QUEUE,
+        PREP_QUEUE,
+        YT_PREP_QUEUE,
+        queue_for,
+    )
 
 _ACTIVITY_TIMEOUT = timedelta(seconds=30)
 _DISCOVERY_TIMEOUT = timedelta(minutes=5)  # platform IO behind a rate-capped queue
 # First embed on a fresh worker loads model weights (~30s) before downloading
 # ~12 previews + GPU inference; 30s would timeout-loop the weight load forever.
 _EMBED_TIMEOUT = timedelta(minutes=10)
+# yt prep serializes behind the extraction governor (8-15s/track jittered):
+# a multi-track artist legitimately needs far longer than the fast lanes.
+_YT_PREP_TIMEOUT = timedelta(minutes=30)
 # Bounded: the calibration run proved unlimited default retries turn a
 # persistent failure (expired signed URLs → 403) into a forever-stall.
 _IO_RETRY = RetryPolicy(maximum_attempts=5)
@@ -88,11 +98,17 @@ class IngestArtistWorkflow:
             # Throughput campaign: CPU staging first (prep queue, high
             # concurrency), then a pure-inference GPU activity. patched()
             # keeps the ~2k in-flight pre-campaign runs deterministic.
+            # youtube prep wedges the shared 12-slot queue against the
+            # serialized extraction governor (slots park on the lock until
+            # start_to_close cancels them, starving fast-lane preps) — it
+            # gets its own concurrency-1 queue. patched(): in-flight runs
+            # that already scheduled prep on the shared queue stay there.
+            yt_prep = choice["source"] == "youtube" and workflow.patched("yt-prep-queue")
             await workflow.execute_activity(
                 activities.prep_artist_clips,
                 args=[inp.artist_id, choice["source"]],
-                task_queue=PREP_QUEUE,
-                start_to_close_timeout=_EMBED_TIMEOUT,
+                task_queue=YT_PREP_QUEUE if yt_prep else PREP_QUEUE,
+                start_to_close_timeout=_YT_PREP_TIMEOUT if yt_prep else _EMBED_TIMEOUT,
                 retry_policy=_IO_RETRY,
             )
             embedded = await workflow.execute_activity(

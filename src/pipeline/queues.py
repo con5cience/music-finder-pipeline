@@ -25,6 +25,11 @@ GPU_QUEUE = "gpu"
 # CPU staging lane (throughput campaign): fetch/decode/windows/CPU-heads run
 # here at high concurrency so the gpu queue is pure inference.
 PREP_QUEUE = "prep"
+# youtube staging runs behind a process-wide serialized governor (8-15s
+# jittered) — on the shared 12-slot prep queue those activities just wedge
+# against the lock until start_to_close cancels them, starving fast-lane
+# preps (2026-06-12 collapse). Own queue, concurrency 1: shape mirrors lock.
+YT_PREP_QUEUE = "prep-yt"
 
 
 @dataclass(frozen=True)

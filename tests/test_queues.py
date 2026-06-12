@@ -16,6 +16,7 @@ from pipeline.queues import (
     GPU_QUEUE,
     PLATFORM_QUEUES,
     PLATFORMS,
+    PREP_QUEUE,
     REFRESHERS,
     WORKFLOW_QUEUE,
     queue_for,
@@ -121,3 +122,30 @@ def test_every_workflow_dispatched_activity_is_registered():
     registered |= {"cascade_plan", "record_scan", "choose_embed_source"}
     missing = dispatched - registered
     assert not missing, f"workflow dispatches unregistered activities: {missing}"
+
+
+def test_yt_prep_queue_is_distinct_and_serial():
+    """yt prep is governed by a process-wide serialized lock (8-15s jittered),
+    so running it 12-concurrent on the shared prep queue just wedges slots
+    against the lock until start_to_close cancels them (2026-06-12 collapse:
+    CancelledError storms, partial stage dirs, fast-lane preps starved).
+    Dedicated queue, concurrency 1 — the queue shape mirrors the lock."""
+    from pipeline.queues import YT_PREP_QUEUE
+    from pipeline.worker import YT_PREP_CONCURRENCY
+
+    assert YT_PREP_QUEUE != PREP_QUEUE
+    assert YT_PREP_QUEUE not in (WORKFLOW_QUEUE, GPU_QUEUE, *(c.name for c in PLATFORM_QUEUES.values()))
+    assert YT_PREP_CONCURRENCY == 1
+
+
+def test_workflow_routes_yt_prep_to_dedicated_queue():
+    # Source-level pin (house style: the dispatched-activities test): the
+    # prep dispatch must branch on the chosen source and reference both
+    # queues, gated by a patch marker for in-flight run determinism.
+    from pathlib import Path
+
+    import pipeline.workflows as wf
+
+    src = Path(wf.__file__).read_text()
+    assert "YT_PREP_QUEUE" in src
+    assert 'workflow.patched("yt-prep-queue")' in src

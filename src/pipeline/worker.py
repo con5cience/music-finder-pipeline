@@ -24,7 +24,14 @@ from temporalio.worker import Worker
 
 from pipeline import activities
 from pipeline.config import Settings
-from pipeline.queues import DISCOVERY_ACTIVITIES, GPU_QUEUE, PLATFORM_QUEUES, PLATFORMS, PREP_QUEUE
+from pipeline.queues import (
+    DISCOVERY_ACTIVITIES,
+    GPU_QUEUE,
+    PLATFORM_QUEUES,
+    PLATFORMS,
+    PREP_QUEUE,
+    YT_PREP_QUEUE,
+)
 from pipeline.workflows import IngestArtistWorkflow
 
 # Activity registries by queue — module-level so the coherence tests can
@@ -33,6 +40,9 @@ from pipeline.workflows import IngestArtistWorkflow
 # test queue, and embed_artist_staged parking 981 staged artists in prod).
 GPU_ACTIVITIES = [activities.embed_artist, activities.embed_artist_staged]
 PREP_ACTIVITIES = [activities.prep_artist_clips]
+# yt prep is serialized by the extraction governor; >1 slot just parks
+# activities on the lock until their timeouts cancel them (pinned by test).
+YT_PREP_CONCURRENCY = 1
 
 # DERIVED from the PLATFORMS descriptor — never hand-edit (review finding:
 # parallel registries drift; test_queues asserts this wiring stays coherent).
@@ -80,6 +90,12 @@ def build_workers(client: Client, settings: Settings, role: str = "all") -> list
             # CPU staging. Measured: 20 cores at load ~5.5 with conc 8 —
             # the cap was serial proxy fetches (now pooled), not CPU.
             max_concurrent_activities=12,
+        ))
+        workers.append(Worker(
+            client,
+            task_queue=YT_PREP_QUEUE,
+            activities=PREP_ACTIVITIES,
+            max_concurrent_activities=YT_PREP_CONCURRENCY,
         ))
     if role in ("all", "gpu"):
         import os
