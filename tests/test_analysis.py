@@ -358,3 +358,52 @@ def test_tag_calibration_zscore_damps_prior_noise(conn):
 
     # refresh is idempotent-replace (derived data)
     assert refresh_calibration(conn) == n
+
+
+def test_backfill_isolates_per_track_failures(conn, tmp_path):
+    """One poisoned track must not kill the whole sweep run. 2026-06-11: a
+    transient URLError out of the deezer URL refresher aborted the 3,151-
+    artist overnight re-sweep two minutes in (rc=1) — the loop only guarded
+    the fetch path, not the refresher/decode/head path."""
+    import json
+
+    import soundfile as sf
+
+    from pipeline.backfill_analysis import backfill_tracks
+    from pipeline.heads import CpuAnalysisHead
+
+    a = conn.execute(
+        "INSERT INTO artist (display_name, mbid) VALUES ('Isolation Fixture', "
+        "'00000000-feed-4bad-9bad-000000000ddd') RETURNING id"
+    ).fetchone()[0]
+    rng = np.random.default_rng(7)
+    good_wav = tmp_path / "good.wav"
+    sf.write(good_wav, (rng.standard_normal(SR * 90) * 0.1).astype(np.float32), SR)
+    urls = {"zz-iso-bad": "/nonexistent/poison.wav", "zz-iso-good": str(good_wav)}
+    for ptid, url in urls.items():
+        t = conn.execute(
+            "INSERT INTO audio_track (artist_id, platform, platform_track_id, audio_url, duration_s, "
+            "binding_tier, binding_evidence, verification_status) "
+            "VALUES (%s,'bandcamp',%s,%s,90,'A',%s,'verified') RETURNING id",
+            (a, ptid, url, json.dumps({"release_index": 0, "track_index": 0})),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO clip_embedding (track_id, segment_start_s, segment_end_s, model, dim, embedding) "
+            "VALUES (%s, 0, 30, 'mock-model', 2, '[0.6,0.8]')",
+            (t,),
+        )
+
+    def exploding_refresher(*args, **kwargs):
+        raise OSError("Remote end closed connection without response")
+
+    def fetch_raising_on_poison(url, workdir):
+        if "poison" in url:
+            raise OSError("boom: not an AudioFetchError")
+        return url
+
+    done, skipped = backfill_tracks(
+        conn, [CpuAnalysisHead()], 10, artist_id=str(a),
+        fetch=fetch_raising_on_poison, refresher=exploding_refresher,
+    )
+    assert done == 1  # the good track completed
+    assert skipped == 1  # the poisoned one was isolated, not fatal

@@ -58,17 +58,25 @@ def backfill_tracks(
     with tempfile.TemporaryDirectory(prefix="backfill-") as tmp:
         workdir = Path(tmp)
         for tid, url, platform, ptid, owner_id in tracks_missing_heads(conn, heads, limit, artist_id):
-            path = _fetch_with_refresh(conn, url, platform, ptid, workdir, fetch, refresher)
-            if path is None:
+            # Per-track isolation: one poisoned track (transient URLError out
+            # of the refresher, corrupt audio, head crash) must not abort a
+            # 3,151-artist overnight sweep — it killed one in 2 min (rc=1).
+            try:
+                path = _fetch_with_refresh(conn, url, platform, ptid, workdir, fetch, refresher)
+                if path is None:
+                    skipped += 1
+                    continue
+                mono, sr = _decode(path)
+                segs = _clips_for_track(mono, sr, path, platform, None, workdir, f"bf-{tid}")
+                ctx = HeadContext(
+                    conn=conn, track_id=tid, artist_id=owner_id, platform=platform,
+                    mono=mono, sr=sr, clip_paths=[p for _s, _e, p in segs],
+                )
+                run_heads(conn, heads, ctx)
+            except Exception as exc:  # noqa: BLE001 — sweep survives, track retries next run
+                print(f"backfill: track {tid} isolated failure: {type(exc).__name__}: {exc}", flush=True)
                 skipped += 1
                 continue
-            mono, sr = _decode(path)
-            segs = _clips_for_track(mono, sr, path, platform, None, workdir, f"bf-{tid}")
-            ctx = HeadContext(
-                conn=conn, track_id=tid, artist_id=owner_id, platform=platform,
-                mono=mono, sr=sr, clip_paths=[p for _s, _e, p in segs],
-            )
-            run_heads(conn, heads, ctx)
             by_artist.setdefault(owner_id, []).append(ctx.mulan_vecs)
             done += 1
     from pipeline.heads import artist_tag_pass
