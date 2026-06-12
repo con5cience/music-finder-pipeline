@@ -128,6 +128,55 @@ def scan_slop(conn: Connection, *, limit: int = 100000,
     return out
 
 
+def gate_unevaluated(conn: Connection, artist_ids: list, *,
+                     threshold: float = FLAG_THRESHOLD) -> dict:
+    """THE CONTINUOUS GATE (2026-06-12): called by publish and the MB queue
+    at their choke points. Scores any artist with no evaluation row — or
+    whose catalog grew since evaluation — and files ai_slop flags for farm
+    shapes in the same cycle that would otherwise expose them. Human
+    verdicts stay final: an existing review_item is never re-filed."""
+    if not artist_ids:
+        return {"evaluated": 0, "flagged": 0}
+    stale = [r[0] for r in conn.execute(
+        """
+        SELECT a.id FROM artist a
+        LEFT JOIN slop_evaluation se ON se.artist_id = a.id
+        WHERE a.id = ANY(%s)
+          AND (se.artist_id IS NULL
+               OR (SELECT count(*) FROM audio_track t WHERE t.artist_id = a.id) > se.n_tracks)
+        """,
+        ([str(x) for x in artist_ids],),
+    ).fetchall()]
+    out = {"evaluated": 0, "flagged": 0}
+    for aid in stale:
+        s = score_artist(conn, aid)
+        conn.execute(
+            """
+            INSERT INTO slop_evaluation (artist_id, score, n_tracks, features)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (artist_id) DO UPDATE SET score = EXCLUDED.score,
+              n_tracks = EXCLUDED.n_tracks, features = EXCLUDED.features,
+              evaluated_at = now()
+            """,
+            (aid, s["score"], s["n_tracks"], json.dumps(s)))
+        out["evaluated"] += 1
+        if s["score"] >= threshold:
+            seen = conn.execute(
+                "SELECT 1 FROM review_item WHERE kind='source_binding' AND reason='ai_slop' "
+                "AND subject_id = %s", (aid,)).fetchone()
+            if not seen:
+                conn.execute(
+                    """
+                    INSERT INTO review_item (kind, subject_type, subject_id, reason, evidence, status)
+                    VALUES ('source_binding', 'artist', %s, 'ai_slop', %s, 'pending')
+                    """,
+                    (aid, json.dumps({"platform": "catalog",
+                                      "query": f"farm-shaped catalog (score {s['score']})",
+                                      "slop": s})))
+                out["flagged"] += 1
+    return out
+
+
 def main() -> None:
     import argparse
 

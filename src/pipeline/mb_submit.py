@@ -190,12 +190,22 @@ def queue_eligible(conn: Connection, limit: int = 50) -> int:
         """,
         (limit,),
     ).fetchall()
+    from pipeline.slop_detect import gate_unevaluated
+
+    gate_unevaluated(conn, [r[0] for r in rows])
+    queued = 0
     for (aid,) in rows:
+        if conn.execute(
+            "SELECT 1 FROM review_item WHERE reason='ai_slop' AND status='pending' "
+            "AND subject_id = %s", (aid,),
+        ).fetchone():
+            continue  # flagged in THIS cycle — never reaches the commons
         conn.execute(
             "INSERT INTO mb_submission (artist_id, payload, status) VALUES (%s, %s, 'spot_check')",
             (aid, json.dumps(build_payload(conn, aid))),
         )
-    return len(rows)
+        queued += 1
+    return queued
 
 
 def submit_tags(conn: Connection, limit: int = 20) -> int:

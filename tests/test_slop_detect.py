@@ -153,3 +153,49 @@ def test_logistic_probe_separates_synthetic_clouds():
     d = rng.normal(0, 1, (600, 32))
     out2 = logistic_probe(c, d)
     assert 0.35 < out2["auc"] < 0.65
+
+
+def test_publish_evaluates_unscored_artists_in_cycle(conn):
+    """THE CONTINUOUS GATE: a farm embedded between audits must be caught
+    by the publish cycle itself — evaluation happens lazily at the choke
+    point, in the same pass that would otherwise expose the artist."""
+    from pipeline.publish import publishable_artists
+    from pipeline.slop_detect import gate_unevaluated
+
+    a = _artist_with_catalog(
+        conn, "lategate",
+        [199, 201, 200, 200, 202, 198, 200, 201, 199, 200, 200, 201],
+        [f"Rain Sounds Part {i}" for i in range(12)])
+    conn.execute(
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
+        "VALUES (%s, 'mock-model', 2, '[1,0]', 4, 1.0)", (a,))
+    rows = publishable_artists(conn, 1000)
+    assert any(r[0] == a for r in rows)  # would have published unflagged
+    out = gate_unevaluated(conn, [r[0] for r in rows])
+    assert out["flagged"] >= 1
+    assert [r for r in publishable_artists(conn, 1000) if r[0] == a] == []  # caught
+    # clean artists get an evaluation row and publish untouched
+    assert conn.execute(
+        "SELECT count(*) FROM slop_evaluation WHERE artist_id = %s", (a,)).fetchone()[0] == 1
+
+
+def test_catalog_growth_triggers_reevaluation(conn):
+    from pipeline.slop_detect import gate_unevaluated
+
+    a = _artist_with_catalog(conn, "growth", [142, 367, 95, 204, 251, 178, 489, 132],
+                             ["A1", "B2", "C3", "D4", "E5", "F6", "G7", "H8"])
+    gate_unevaluated(conn, [a])
+    first = conn.execute(
+        "SELECT n_tracks, evaluated_at FROM slop_evaluation WHERE artist_id=%s", (a,)).fetchone()
+    # catalog doubles with farm-shaped additions
+    for i in range(12):
+        conn.execute(
+            "INSERT INTO audio_track (artist_id, platform, platform_track_id, audio_url, duration_s, "
+            "binding_tier, verification_status, binding_evidence) "
+            "VALUES (%s,'soundcloud',%s,'/x.mp3',%s,'A','verified',%s)",
+            (a, f"zz-slop-growth-x{i}", 200 + (i % 3), json.dumps({"title": f"Sleep Aid {i}"})))
+    out = gate_unevaluated(conn, [a])
+    assert out["evaluated"] == 1  # re-scored because the catalog grew
+    second = conn.execute(
+        "SELECT n_tracks FROM slop_evaluation WHERE artist_id=%s", (a,)).fetchone()
+    assert second[0] > first[0]

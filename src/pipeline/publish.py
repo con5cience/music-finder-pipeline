@@ -111,6 +111,17 @@ def publish_incremental(factory: Connection, app: Connection, limit: int = 10000
         rows = publishable_artists(factory, limit, since=wm, after_id=after)
         if not rows:
             break
+        # continuous slop gate: evaluate first-time/grown catalogs in the
+        # same cycle; freshly flagged artists drop out before publishing
+        from pipeline.slop_detect import gate_unevaluated
+
+        gated = gate_unevaluated(factory, [r[0] for r in rows])
+        if gated["flagged"]:
+            flagged_now = {r[0] for r in factory.execute(
+                """SELECT subject_id FROM review_item WHERE reason='ai_slop'
+                   AND status='pending' AND subject_id = ANY(%s)""",
+                ([str(r[0]) for r in rows],)).fetchall()}
+            rows = [r for r in rows if r[0] not in flagged_now]
         publish_rows(factory, app, rows)
         n += len(rows)
         after = rows[-1][0]
