@@ -30,15 +30,24 @@ from psycopg import Connection
 from pipeline.adjudicate import CONFIRM, REJECT, candidate_cosine
 
 DEFAULT_MODEL = "muq-large-msd"
-PROBEABLE = ("deezer", "bandcamp", "soundcloud")
+PROBEABLE = ("deezer", "bandcamp", "soundcloud", "apple_music", "youtube")
 
 
 def corroborate_blind_spot(conn: Connection, *, embedder, limit: int = 50,
                            model: str = DEFAULT_MODEL, fetch=None,
                            confirm: float = CONFIRM, reject: float = REJECT,
-                           commit_each: bool = False) -> dict:
+                           commit_each: bool = False,
+                           platforms: tuple = PROBEABLE,
+                           retry_status: str | None = None) -> dict:
     if fetch is None:
         from pipeline.embed_job import fetch_audio as fetch
+    if retry_status:
+        conn.execute(
+            """UPDATE platform_identity
+               SET binding_evidence = binding_evidence - 'corroboration'
+               WHERE binding_tier = 'B'
+                 AND binding_evidence->'corroboration'->>'status' = %s""",
+            (retry_status,))
     rows = conn.execute(
         """
         SELECT a.id, pi_b.id, ae.embedding::text,
@@ -55,7 +64,7 @@ def corroborate_blind_spot(conn: Connection, *, embedder, limit: int = 50,
                           AND t.platform <> a.embedding_source)
         LIMIT %s
         """,
-        (list(PROBEABLE), model, limit),
+        (list(platforms), model, limit),
     ).fetchall()
     out = {"confirmed": 0, "refuted": 0, "unprobeable": 0, "gray": 0, "no_a_pages": 0}
     for artist_id, identity_id, emb_text, a_pages in rows:
@@ -135,6 +144,9 @@ def main() -> None:
 
     ap = argparse.ArgumentParser(description="acoustically corroborate single-source B-tier bindings")
     ap.add_argument("--limit", type=int, default=50)
+    ap.add_argument("--platforms", default=",".join(PROBEABLE))
+    ap.add_argument("--retry-status", default=None,
+                    help="clear corroboration markers with this status and re-attempt (e.g. no_a_pages)")
     args = ap.parse_args()
     os.environ.setdefault("PIPELINE_FP16", "0")  # the 30s-clip NaN lesson
     from pipeline.embedders.registry import get_embedder
@@ -142,6 +154,8 @@ def main() -> None:
     embedder = get_embedder()
     with psycopg.connect(Settings().database_url) as conn:
         print(corroborate_blind_spot(conn, embedder=embedder, limit=args.limit,
+                                     platforms=tuple(args.platforms.split(",")),
+                                     retry_status=args.retry_status,
                                      commit_each=True))
 
 

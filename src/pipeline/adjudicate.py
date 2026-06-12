@@ -48,8 +48,11 @@ _last_fetch: dict[str, float] = {}
 
 def _polite(platform: str) -> None:
     """Self-throttle page/API probes to the platform's server-side budget —
-    host-side bulk runs bypass the Temporal rate caps, so we keep them here."""
-    budget = max(PLATFORMS[platform].io_rate, 0.2)
+    host-side bulk runs bypass the Temporal rate caps, so we keep them here.
+    Platforms outside the descriptor registry (apple_music: keyless iTunes
+    API, ~20/min guideline) get a conservative default."""
+    src = PLATFORMS.get(platform)
+    budget = max(src.io_rate, 0.2) if src else 0.33
     wait = _last_fetch.get(platform, 0.0) + 1.0 / budget - time.monotonic()
     if wait > 0:
         time.sleep(wait)
@@ -95,6 +98,22 @@ def probe_candidate_urls(conn: Connection, platform: str, platform_id: str,
                 if len(urls) >= max_clips:
                     break
             return urls
+        if platform == "apple_music":
+            _polite(platform)
+            body = cached_fetch(
+                conn, "apple_music",
+                f"https://itunes.apple.com/lookup?id={platform_id}&entity=song&limit=10",
+                refresh=True).body  # previewUrl assets rotate like deezer's
+            results = json.loads(body).get("results", [])
+            return [r["previewUrl"] for r in results
+                    if r.get("wrapperType") == "track" and r.get("previewUrl")][:max_clips]
+        if platform == "youtube":
+            from pipeline.sources.youtube import fetch_channel_videos, music_band
+
+            videos = music_band(fetch_channel_videos(platform_id))
+            # yt: scheme rides the governed extraction lane (serialized,
+            # jittered, kill-switchable) — fetch_audio handles it
+            return [f"yt:{v['id']}" for v in videos[:max_clips]]
         if platform == "bandcamp":
             from pipeline.sources.bandcamp import parse_discography, parse_tralbum
 
@@ -125,7 +144,13 @@ def _center_clip(path: str, workdir: Path) -> str | None:
     import soundfile as sf
 
     try:
-        info = sf.info(path)
+        try:
+            info = sf.info(path)
+        except Exception:  # noqa: BLE001 — libsndfile can't read m4a/aac
+            path = _ffmpeg_to_wav(path, workdir)
+            if path is None:
+                return None
+            info = sf.info(path)
         start = 0
         frames = -1
         if info.duration > _CLIP_S + 1:
@@ -140,6 +165,20 @@ def _center_clip(path: str, workdir: Path) -> str | None:
         return out
     except Exception:  # noqa: BLE001
         return None
+
+
+def _ffmpeg_to_wav(path: str, workdir: Path) -> str | None:
+    """Decode formats libsndfile can't (m4a previews) via ffmpeg — present in
+    the worker image; the corroborator runs in-container for exactly this."""
+    import shutil
+    import subprocess
+
+    if shutil.which("ffmpeg") is None:
+        return None
+    out = str(workdir / (Path(path).stem + "-ff.wav"))
+    r = subprocess.run(["ffmpeg", "-y", "-i", path, "-ac", "1", out],
+                       capture_output=True, timeout=120)
+    return out if r.returncode == 0 else None
 
 
 def candidate_cosine(conn: Connection, centroid: np.ndarray, platform: str,

@@ -112,3 +112,25 @@ def test_unprobeable_marked_and_skipped(conn, cosines):
     assert ev["corroboration"]["status"] == "unprobeable"
     # idempotent: marked identities never re-probe
     assert corroborate_blind_spot(conn, embedder=object(), model="mock-model")["processed"] == 0
+
+
+def test_apple_and_youtube_pages_are_probeable(conn, cosines):
+    a = _blind_artist(conn, "Cb Apple", "0004", a_platform="apple_music")
+    cosines["zz-cb-a-0004"] = 0.9
+    out = corroborate_blind_spot(conn, embedder=object(), model="mock-model")
+    assert out["confirmed"] == 1
+    b = _blind_artist(conn, "Cb Tube", "0005", a_platform="youtube")
+    cosines["zz-cb-a-0005"] = 0.3
+    out = corroborate_blind_spot(conn, embedder=object(), model="mock-model")
+    assert out["refuted"] == 1
+
+
+def test_retry_status_clears_markers_for_reattempt(conn, cosines):
+    a = _blind_artist(conn, "Cb Retry", "0006", a_platform="tidal")  # unprobeable platform
+    out = corroborate_blind_spot(conn, embedder=object(), model="mock-model")
+    assert out["no_a_pages"] == 1
+    # later, with new probe branches, the same artists become reachable
+    cosines["zz-cb-a-0006"] = 0.95
+    out = corroborate_blind_spot(conn, embedder=object(), model="mock-model",
+                                 platforms=("tidal",), retry_status="no_a_pages")
+    assert out["confirmed"] == 1
