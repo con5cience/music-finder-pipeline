@@ -57,15 +57,20 @@ def _polite(platform: str) -> None:
 
 
 def probe_candidate_urls(conn: Connection, platform: str, platform_id: str,
-                         *, max_clips: int = PROBE_CLIPS) -> list[str]:
+                         *, max_clips: int = PROBE_CLIPS) -> list[str] | None:
     """Up to max_clips audio URLs for a candidate page. READ-ONLY: never
-    touches audio_track/platform_identity. Returns [] when unprobeable."""
+    touches audio_track/platform_identity. [] = page exists with NO audio
+    (an empty account cannot be the audio source — it does not block a
+    verdict); None = probe ERROR (unknown evidence — it blocks)."""
     try:
         if platform == "deezer":
             from pipeline.sources.deezer import _API, parse_tracks
 
             _polite(platform)
-            body = cached_fetch(conn, "deezer", f"{_API}/artist/{platform_id}/top?limit=10").body
+            # refresh=True: the cached payload carries EXPIRING signed preview
+            # urls (hdnea=exp) — a cache hit serves dead 403 links
+            body = cached_fetch(conn, "deezer", f"{_API}/artist/{platform_id}/top?limit=10",
+                                refresh=True).body
             return [t.preview_url for t in parse_tracks(body, platform_id)[:max_clips]]
         if platform == "soundcloud":
             from pipeline.sources.soundcloud import (
@@ -108,7 +113,7 @@ def probe_candidate_urls(conn: Connection, platform: str, platform_id: str,
     except Exception as exc:  # noqa: BLE001 — unprobeable is gray, but NEVER silent
         import sys
         print(f"probe {platform}:{platform_id} failed: {exc!r}", file=sys.stderr, flush=True)
-        return []
+        return None  # ERROR: unknown evidence — blocks auto-verdicts
     return []
 
 
@@ -138,9 +143,14 @@ def _center_clip(path: str, workdir: Path) -> str | None:
 
 
 def candidate_cosine(conn: Connection, centroid: np.ndarray, platform: str,
-                     platform_id: str, embedder, workdir: Path, fetch) -> float | None:
-    """Mean clip-vector cosine vs the artist centroid; None = unprobeable."""
+                     platform_id: str, embedder, workdir: Path, fetch):
+    """(cosine, no_audio): cosine None = could not hear; no_audio True = the
+    page itself has no streamable tracks (known-empty, not an error)."""
     urls = probe_candidate_urls(conn, platform, platform_id)
+    if urls is None:
+        return None, False
+    if not urls:
+        return None, True
     clips = []
     for i, url in enumerate(urls):
         try:
@@ -153,7 +163,7 @@ def candidate_cosine(conn: Connection, centroid: np.ndarray, platform: str,
             print(f"clip fetch {platform_id} failed: {exc!r}", file=sys.stderr, flush=True)
             continue
     if not clips:
-        return None
+        return None, False  # had urls but none fetchable — treat as error
     from pipeline.bench.types import Clip
 
     vecs = np.asarray(embedder.embed(
@@ -164,7 +174,7 @@ def candidate_cosine(conn: Connection, centroid: np.ndarray, platform: str,
     cos = float(np.dot(mean, centroid))
     # silent/corrupt audio can embed to NaN — that is ABSENT evidence, and
     # json.dumps would emit literal NaN (invalid JSON to postgres)
-    return cos if np.isfinite(cos) else None
+    return (cos, False) if np.isfinite(cos) else (None, False)
 
 
 def adjudicate_pending(conn: Connection, *, embedder, limit: int = 50,
@@ -200,18 +210,23 @@ def adjudicate_pending(conn: Connection, *, embedder, limit: int = 50,
         with tempfile.TemporaryDirectory(prefix="adjudicate-") as tmp:
             scored = []
             for c in cands:
-                cos = candidate_cosine(conn, centroid, platform, str(c.get("platform_id")),
-                                       embedder, Path(tmp), fetch)
-                scored.append({**c, "acoustic": None if cos is None else round(cos, 4)})
+                cos, no_audio = candidate_cosine(conn, centroid, platform,
+                                                 str(c.get("platform_id")),
+                                                 embedder, Path(tmp), fetch)
+                scored.append({**c, "acoustic": None if cos is None else round(cos, 4),
+                               "no_audio": no_audio})
         known = [c for c in scored if c["acoustic"] is not None]
         confirmed = [c for c in known if c["acoustic"] >= confirm]
+        # only probe ERRORS block a verdict: a page with zero streamable
+        # tracks cannot be the audio source the binding exists to provide
+        accounted = [c for c in scored if c["acoustic"] is not None or c["no_audio"]]
         evidence["candidates"] = scored
         evidence["adjudicated"] = True
         if not known:
             out["unprobeable"] += 1
             conn.execute("UPDATE review_item SET evidence = %s WHERE id = %s AND status = 'pending'",
                          (json.dumps(evidence), rid))
-        elif len(confirmed) == 1 and len(known) == len(cands):
+        elif len(confirmed) == 1 and len(accounted) == len(cands):
             c = confirmed[0]
             evidence["decision"] = {"platform": platform, "platform_id": str(c["platform_id"]),
                                     "method": "auto_coherence", "cosine": c["acoustic"]}
@@ -221,7 +236,7 @@ def adjudicate_pending(conn: Connection, *, embedder, limit: int = 50,
                 "WHERE id=%s AND status='pending'",
                 (json.dumps(evidence), rid))
             out["approved"] += 1
-        elif known and all(c["acoustic"] < reject for c in known) and len(known) == len(cands):
+        elif known and all(c["acoustic"] < reject for c in known) and len(accounted) == len(cands):
             conn.execute(
                 "UPDATE review_item SET status='rejected', evidence=%s, resolved_at=now(), "
                 "note='auto: no candidate sounds like this artist' "

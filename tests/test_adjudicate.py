@@ -52,7 +52,12 @@ def probes(monkeypatch, tmp_path):
     table: dict[str, list[float] | None] = {}
 
     def fake_probe(conn, platform, platform_id, **kw):
-        return [f"vec:{platform_id}"] if table.get(platform_id) is not None else []
+        v = table.get(platform_id, "ERROR")
+        if v == "ERROR":
+            return None  # probe error — unknown evidence
+        if v == "EMPTY":
+            return []  # page exists, zero streamable tracks
+        return [f"vec:{platform_id}"]
 
     def fake_fetch(url, workdir):
         pid = url.split(":", 1)[1]
@@ -114,10 +119,25 @@ def test_unprobeable_candidate_blocks_auto_verdict(conn, probes):
     rid = _item(conn, a, [{"name": "Heard", "platform_id": "p-heard", "popularity": 1},
                           {"name": "Silent", "platform_id": "p-silent", "popularity": 2}])
     probes["p-heard"] = [0.99, 0.01]
-    probes["p-silent"] = None  # probe returns nothing
+    probes["p-silent"] = "ERROR"  # probe ERROR — unknown evidence blocks
     out = adjudicate_pending(conn, embedder=VecEmbedder(), fetch=probes["_fetch"], model="mock-model")
     assert out["annotated"] == 1
     assert conn.execute("SELECT status FROM review_item WHERE id=%s", (rid,)).fetchone()[0] == "pending"
+
+
+def test_empty_account_rival_does_not_block_confirm(conn, probes):
+    # a rival page with ZERO streamable tracks cannot be the audio source —
+    # known-empty is accounted evidence, unlike a probe error
+    a = _artist(conn, "Adj Empty", "0007")
+    rid = _item(conn, a, [{"name": "Real", "platform_id": "p-real", "popularity": 1},
+                          {"name": "Husk", "platform_id": "p-husk", "popularity": 2}])
+    probes["p-real"] = [0.99, 0.01]
+    probes["p-husk"] = "EMPTY"
+    out = adjudicate_pending(conn, embedder=VecEmbedder(), fetch=probes["_fetch"], model="mock-model")
+    assert out["approved"] == 1
+    ev = conn.execute("SELECT evidence FROM review_item WHERE id=%s", (rid,)).fetchone()[0]
+    assert ev["decision"]["platform_id"] == "p-real"
+    assert ev["candidates"][1]["no_audio"] is True
 
 
 def test_nan_cosine_is_unprobeable_not_poison(conn, probes):
