@@ -149,7 +149,10 @@ def candidate_cosine(conn: Connection, centroid: np.ndarray, platform: str,
     ), dtype=np.float32)
     mean = vecs.mean(axis=0)
     mean /= max(float(np.linalg.norm(mean)), 1e-9)
-    return float(np.dot(mean, centroid))
+    cos = float(np.dot(mean, centroid))
+    # silent/corrupt audio can embed to NaN — that is ABSENT evidence, and
+    # json.dumps would emit literal NaN (invalid JSON to postgres)
+    return cos if np.isfinite(cos) else None
 
 
 def adjudicate_pending(conn: Connection, *, embedder, limit: int = 50,

@@ -120,6 +120,19 @@ def test_unprobeable_candidate_blocks_auto_verdict(conn, probes):
     assert conn.execute("SELECT status FROM review_item WHERE id=%s", (rid,)).fetchone()[0] == "pending"
 
 
+def test_nan_cosine_is_unprobeable_not_poison(conn, probes):
+    # silent/corrupt probe audio -> NaN vector -> NaN cosine; json.dumps
+    # would emit literal NaN (invalid JSON to pg, the NaN-saga lesson).
+    # A NaN candidate is UNPROBEABLE evidence, never a verdict or a write.
+    a = _artist(conn, "Adj NaN", "0006")
+    rid = _item(conn, a, [{"name": "Quiet", "platform_id": "p-nan", "popularity": 1}])
+    probes["p-nan"] = [float("nan"), float("nan")]
+    out = adjudicate_pending(conn, embedder=VecEmbedder(), fetch=probes["_fetch"], model="mock-model")
+    assert out["unprobeable"] == 1
+    ev = conn.execute("SELECT evidence FROM review_item WHERE id=%s", (rid,)).fetchone()[0]
+    assert ev["candidates"][0]["acoustic"] is None  # stored as null, not NaN
+
+
 def test_poller_carries_auto_method_into_binding(conn):
     from pipeline.review_poller import apply_approved_bindings
 
