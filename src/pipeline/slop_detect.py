@@ -41,7 +41,8 @@ _NUMBERED = re.compile(r"(\b(vol|volume|part|pt|episode|ep|no|#)\.?\s*\d+|\s\d{1
 def score_artist(conn: Connection, artist_id) -> dict:
     rows = conn.execute(
         """
-        SELECT t.duration_s, t.binding_evidence->>'title'
+        SELECT COALESCE((t.binding_evidence->>'track_duration_s')::float, t.duration_s),
+               t.binding_evidence->>'title'
         FROM audio_track t
         JOIN artist a ON a.id = t.artist_id AND t.platform = COALESCE(a.embedding_source, t.platform)
         WHERE t.artist_id = %s
@@ -49,6 +50,11 @@ def score_artist(conn: Connection, artist_id) -> dict:
         (artist_id,),
     ).fetchall()
     durations = [r[0] for r in rows if r[0] and r[0] > 0]
+    # 854-artist lesson: deezer stores the CONSTANT preview length as
+    # duration_s — a single-valued duration set is a data artifact, never
+    # evidence (real track lengths ride binding_evidence.track_duration_s)
+    if len(set(durations)) <= 1:
+        durations = []
     titles = [r[1] for r in rows if r[1]]
     out = {"n_tracks": len(rows), "score": 0.0, "duration_cv": None,
            "numbered_ratio": None, "dup_title_ratio": None}

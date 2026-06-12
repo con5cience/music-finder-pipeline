@@ -58,7 +58,8 @@ def test_scan_flags_and_holds_from_publish(conn):
 
     a = _artist_with_catalog(
         conn, "farm2",
-        [200] * 15, [f"Sleep Music Part {i}" for i in range(15)])
+        [199, 201, 200, 200, 202, 198, 200, 201, 199, 200, 200, 201, 199, 200, 202],
+        [f"Sleep Music Part {i}" for i in range(15)])
     conn.execute(
         "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
         "VALUES (%s, 'mock-model', 2, '[1,0]', 4, 1.0)", (a,))
@@ -87,7 +88,8 @@ def test_mb_queue_excludes_slop_flagged(conn):
     from pipeline.mb_submit import queue_eligible
 
     a = _artist_with_catalog(
-        conn, "farm3", [240] * 12, [f"Ambient Sessions {i}" for i in range(12)])
+        conn, "farm3", [239, 241, 240, 240, 242, 238, 240, 241, 239, 240, 240, 241],
+        [f"Ambient Sessions {i}" for i in range(12)])
     conn.execute(
         "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
         "VALUES (%s, 'mock-model', 2, '[1,0]', 4, 1.0)", (a,))
@@ -98,3 +100,39 @@ def test_mb_queue_excludes_slop_flagged(conn):
     queue_eligible(conn, limit=100)
     assert conn.execute(
         "SELECT count(*) FROM mb_submission WHERE artist_id=%s", (a,)).fetchone()[0] == 0
+
+
+def test_preview_constant_duration_is_not_evidence(conn):
+    """854-artist false-positive wave (2026-06-12): deezer stores the
+    CONSTANT preview length (30s) as duration_s, so every deezer artist
+    had cv=0.0 by construction — classical ensembles with movement
+    numbering got frozen as farms. Real durations live in
+    binding_evidence.track_duration_s; degenerate single-valued duration
+    sets are VOID evidence either way."""
+    a = conn.execute(
+        "INSERT INTO artist (display_name, mbid, embedding_source) VALUES "
+        "('I Solisti Fixture', '00000000-feed-4bad-9bad-0000000b2b01', 'deezer') RETURNING id"
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO platform_identity (artist_id, platform, platform_id, page_type, binding_tier) "
+        "VALUES (%s, 'deezer', 'zz-slop-prev', 'artist', 'A')", (a,))
+    real = [412, 188, 305, 247, 533, 164, 421, 376, 290, 198, 350, 275]
+    for i, d in enumerate(real):
+        conn.execute(
+            "INSERT INTO audio_track (artist_id, platform, platform_track_id, audio_url, duration_s, "
+            "binding_tier, verification_status, binding_evidence) "
+            "VALUES (%s,'deezer',%s,'/x.mp3',30,'A','verified',%s)",
+            (a, f"zz-slop-prev-{i}", json.dumps({
+                "title": f"Sonata No. {i + 1}", "track_duration_s": d})))
+    s = score_artist(conn, a)
+    assert s["score"] < 0.6  # movements + varied REAL durations = human
+    assert s["duration_cv"] is None or s["duration_cv"] > 0.05
+
+
+def test_degenerate_single_duration_value_is_void(conn):
+    # even without evidence durations, a single distinct stored value can
+    # never count as uniformity — it's a data artifact, not a measurement
+    a = _artist_with_catalog(conn, "constonly", [30] * 12,
+                             [f"Mix {i}" for i in range(12)])
+    s = score_artist(conn, a)
+    assert s["duration_cv"] is None
