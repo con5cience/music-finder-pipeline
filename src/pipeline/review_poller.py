@@ -41,7 +41,11 @@ def apply_approved_bindings(conn: Connection, limit: int = 500) -> int:
                 ON CONFLICT DO NOTHING
                 """,
                 (artist_id, platform, platform_id,
-                 json.dumps({"method": "admin_review", "review_item_id": str(rid)})),
+                 # decision.method distinguishes human approval from acoustic
+                 # auto-adjudication (auto_coherence carries its cosine)
+                 json.dumps({"method": decision.get("method", "admin_review"),
+                             "review_item_id": str(rid),
+                             **({"cosine": decision["cosine"]} if "cosine" in decision else {})})),
             )
             applied += 1
         # resolved either way: a decision without a usable candidate is closed
