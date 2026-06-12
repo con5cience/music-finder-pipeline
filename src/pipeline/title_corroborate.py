@@ -69,6 +69,28 @@ def _meaningful(titles: set[str]) -> set[str]:
     return {t for t in titles if len(t) >= 4 and t not in STOP_TITLES}
 
 
+def _latin_ratio(raw_titles: set[str]) -> float:
+    """Share of titles that are predominantly Latin/ascii in their RAW form —
+    cross-script catalogs (CJK vs romaji) can never exact-match, so zero
+    overlap there is a script artifact, not a disagreement."""
+    if not raw_titles:
+        return 1.0
+    latin = sum(1 for t in raw_titles
+                if sum(c.isascii() for c in t) >= 0.7 * max(len(t), 1))
+    return latin / len(raw_titles)
+
+
+def _containment_overlap(a: set[str], b: set[str], min_len: int = 6) -> int:
+    """Titles where one side CONTAINS the other (>=min_len chars) — kana
+    mangling leaves fragments like '2024ver' inside 'yumenikoisite 2024ver'.
+    Containment BLOCKS refutation only; it never confirms (Beat != Beatles)."""
+    n = 0
+    for x in a:
+        if len(x) >= min_len and any(x in y or y in x for y in b):
+            n += 1
+    return n
+
+
 def mb_titles(conn: Connection, mbid: str, *, schema: str = "mb_raw") -> set[str]:
     rows = conn.execute(
         f"""SELECT r.name FROM {schema}.artist a
@@ -107,9 +129,19 @@ def title_corroborate(conn: Connection, *, limit: int = 100000,
     ).fetchall()
     out = {"confirmed": 0, "refuted": 0, "gray": 0, "no_mb_recordings": 0}
     for artist_id, mbid, identity_id, source in rows:
+        raw_mb = {r[0] for r in conn.execute(
+            f"""SELECT r.name FROM mb_raw.artist a
+                JOIN mb_raw.artist_credit_name acn ON acn.artist = a.id
+                JOIN mb_raw.recording r ON r.artist_credit = acn.artist_credit
+                WHERE a.gid = %s::uuid""", (mbid,)).fetchall() if r[0]}
+        raw_src = {r[0] for r in conn.execute(
+            "SELECT binding_evidence->>'title' FROM audio_track WHERE artist_id=%s AND platform=%s",
+            (artist_id, source)).fetchall() if r[0]}
         mb = _meaningful(mb_titles(conn, mbid))
         src = _meaningful(source_titles(conn, artist_id, source))
         matches = mb & src
+        script_safe = _latin_ratio(raw_mb) >= 0.7 and _latin_ratio(raw_src) >= 0.7
+        containment = _containment_overlap(mb, src)
         if not mb:
             _mark(conn, identity_id, {"status": "no_mb_recordings", "method": "title_overlap"})
             out["no_mb_recordings"] += 1
@@ -125,7 +157,8 @@ def title_corroborate(conn: Connection, *, limit: int = 100000,
                              "matches": len(matches), "mb_titles": len(mb),
                              "src_titles": len(src)}), identity_id))
             out["confirmed"] += 1
-        elif not matches and len(mb) >= REFUTE_MIN_EACH_SIDE and len(src) >= REFUTE_MIN_EACH_SIDE:
+        elif (not matches and script_safe and containment == 0
+              and len(mb) >= REFUTE_MIN_EACH_SIDE and len(src) >= REFUTE_MIN_EACH_SIDE):
             _mark(conn, identity_id,
                   {"status": "refuted", "method": "title_overlap",
                    "matches": 0, "mb_titles": len(mb), "src_titles": len(src)})

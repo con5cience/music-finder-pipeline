@@ -107,3 +107,40 @@ def test_no_mb_recordings_marked(conn, mb_recordings):
     assert out["no_mb_recordings"] == 1
     # idempotent: marker prevents reprocessing
     assert title_corroborate(conn)["processed"] == 0
+
+
+def test_cross_script_sides_never_refute(conn, mb_recordings):
+    # プエラの絶対値 false-positive (2026-06-12): MB stores CJK titles, the
+    # platform stores romaji — the ascii fold mangles kana to fragments, so
+    # zero overlap is a SCRIPT artifact, not a disagreement. A side whose
+    # raw titles are predominantly non-Latin can downgrade to gray, never
+    # refute.
+    mbid = mb_recordings("000006", 9100006,
+                         ["夢に恋して2024ver", "アイドル英雄", "嘘つきサマー戦地",
+                          "やっと出会えた君へ", "終わらない歌"])
+    a = _unreachable_artist(conn, "tc6", mbid,
+                            ["yumenikoisite 2024ver", "idol hero", "usotsuki summer senchi",
+                             "yatto deaeta kimi he", "owaranai uta"])
+    out = title_corroborate(conn)
+    assert out["refuted"] == 0
+    assert out["gray"] == 1
+    assert conn.execute(
+        "SELECT count(*) FROM review_item WHERE subject_id=%s AND reason='source_coherence'",
+        (a,)).fetchone()[0] == 0
+
+
+def test_mixed_script_with_containment_match_never_refutes(conn, mb_recordings):
+    # The LIVE プエラの絶対値 shape: MB has enough English titles to clear the
+    # refute threshold, but the real match hides behind kana mangling —
+    # MB's "夢に恋して2024ver" survives as just "2024ver", which is CONTAINED
+    # in the source's romaji "yumenikoisite 2024ver". Containment overlap
+    # (>=6 chars) blocks refutation; confirmation stays exact-only.
+    mbid = mb_recordings("000007", 9100007,
+                         ["Never Give Me Up", "Overture", "Q.E.D.", "Reboot",
+                          "Super Darling", "夢に恋して2024ver"])
+    a = _unreachable_artist(conn, "tc7", mbid,
+                            ["yumenikoisite 2024ver", "idol hero", "usotsuki summer",
+                             "yatto deaeta", "owaranai uta"])
+    out = title_corroborate(conn)
+    assert out["refuted"] == 0
+    assert out["gray"] == 1
