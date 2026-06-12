@@ -141,3 +141,24 @@ def test_binding_audit_reports_methods_and_flags(conn):
     out = audit(conn)
     assert any(r[0] == "source_coherence" for r in out["open_flags"])
     assert out["methods"]  # provenance distribution always present
+
+
+def test_dataset_audit_detects_seeded_anomalies(conn):
+    from pipeline.dataset_audit import audit_factory
+
+    base = audit_factory(conn)
+    # seed: tags on an artist with no embedding + an orphaned track + blank name
+    a = conn.execute(
+        "INSERT INTO artist (display_name, mbid) VALUES ('Audit Seed', "
+        "'00000000-feed-4bad-9bad-00000000e0e0') RETURNING id").fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_tag_scores (artist_id, tag, score, model) "
+        "VALUES (%s, 'zz-audit-tag', 0.5, 'mock-model')", (a,))
+    conn.execute(
+        "INSERT INTO audio_track (artist_id, platform, platform_track_id, audio_url, duration_s, "
+        "binding_tier, verification_status) VALUES (%s,'deezer','zz-audit-orphan','/x.mp3',2,'A','verified')",
+        (a,))
+    out = audit_factory(conn)
+    assert out["tag_rows_on_unembedded_artists"] == base["tag_rows_on_unembedded_artists"] + 1
+    assert out["tracks_without_identity"] == base["tracks_without_identity"] + 1
+    assert out["tracks_duration_outliers"] == base["tracks_duration_outliers"] + 1  # 2s track
