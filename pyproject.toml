@@ -88,6 +88,7 @@ mb-refresh = "python -m pipeline.mb_refresh"   # ADR-018 monthly refresh (dry-ru
 mb-sync = "python -m pipeline.mb_sync"   # download latest fullexport + refresh (dry-run default; quiet window!)
 fingerprint = "python -m pipeline.fingerprint"   # dedup matcher (flag-only)
 coherence = "python -m pipeline.coherence"   # cross-source binding validator (flag + publish/MB gate)
+binding-audit = "python -m pipeline.binding_audit"   # provenance distribution + integrity flags report
 discover = "python -m pipeline.discovery"   # ADR-019 BC discovery (trickle valve via --admit)
 mb-submit = "python -m pipeline.mb_submit"   # MB contribution lane (consent → queue → tags)
 wave3 = "python -m pipeline.wave3"   # gated heads, selected slices only

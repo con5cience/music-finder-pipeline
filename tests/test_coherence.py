@@ -128,3 +128,16 @@ def test_mb_queue_excludes_flagged_artists(conn):
     assert conn.execute(
         "SELECT count(*) FROM mb_submission WHERE artist_id = %s", (a,),
     ).fetchone()[0] == 0  # never queued while acoustically suspect
+
+
+def test_binding_audit_reports_methods_and_flags(conn):
+    from pipeline.binding_audit import audit
+
+    a = _artist_with_sources(conn, "Audit Fix", MBID[:-4] + "0005", {
+        "deezer": [[1, 0], [0.99, 0.05]],
+        "bandcamp": [[0, 1], [0.05, 0.99]],
+    })
+    scan_coherence(conn, model="mock-model")
+    out = audit(conn)
+    assert any(r[0] == "source_coherence" for r in out["open_flags"])
+    assert out["methods"]  # provenance distribution always present
