@@ -147,10 +147,15 @@ def build_payload(conn: Connection, artist_id) -> dict:
     cand = conn.execute(
         "SELECT location, links FROM bc_candidate WHERE artist_id = %s", (artist_id,)
     ).fetchone()
+    # Provenance gate: only MB-declared/own-page (A) or human-confirmed (C)
+    # bindings ride upstream. Tier-B is a machine guess — the typo tier
+    # shipped 191 wrong artists before it was caught (2026-06-12), and a
+    # B-tier URL in an MB edit would push OUR mistake into the commons.
     urls = [
         {"url": vanity or _default_url(p, pid), "platform": p}
         for p, pid, vanity in conn.execute(
-            "SELECT platform, platform_id, vanity_url FROM platform_identity WHERE artist_id = %s",
+            "SELECT platform, platform_id, vanity_url FROM platform_identity "
+            "WHERE artist_id = %s AND binding_tier IN ('A', 'C')",
             (artist_id,),
         ).fetchall()
     ]

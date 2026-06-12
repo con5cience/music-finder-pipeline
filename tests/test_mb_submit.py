@@ -44,3 +44,25 @@ def test_payload_and_eligibility(conn):
     assert status == "spot_check"
     assert payload["area_hint"] == "Kraków, Poland"
     assert queue_eligible(conn, 10) == 0  # idempotent
+
+
+def test_payload_urls_exclude_unconfirmed_tier_b(conn):
+    """MB submissions are our signature upstream — only MB-declared (A) or
+    human-confirmed (C) bindings may ride in url-rels. Tier-B is a machine
+    guess: the typo tier shipped 191 wrong artists before it was caught
+    (2026-06-12), and exact-unique carries silent homonym risk. A B-tier
+    URL in an MB edit would push OUR mistake into the commons."""
+    from pipeline.mb_submit import build_payload
+
+    a = conn.execute(
+        "INSERT INTO artist (display_name) VALUES ('Provenance Fixture') RETURNING id"
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO platform_identity (artist_id, platform, platform_id, page_type, binding_tier) VALUES "
+        "(%s, 'bandcamp', 'zz-prov-own', 'artist', 'A'), "
+        "(%s, 'deezer', '990200', 'artist', 'B'), "
+        "(%s, 'soundcloud', 'zz-prov-conf', 'artist', 'C')",
+        (a, a, a),
+    )
+    urls = {u["platform"] for u in build_payload(conn, a)["urls"]}
+    assert urls == {"bandcamp", "soundcloud"}  # B-tier deezer guess excluded
