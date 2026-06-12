@@ -191,12 +191,24 @@ def adjudicate_pending(conn: Connection, *, embedder, limit: int = 50,
         """
         SELECT ri.id, ri.subject_id, ri.evidence, ae.embedding::text
         FROM review_item ri
+        JOIN artist a ON a.id = ri.subject_id
         JOIN artist_embedding ae ON ae.artist_id = ri.subject_id AND ae.model = %s
+        -- TRUSTED ANCHOR LAW (operator catch, 2026-06-12): the centroid is
+        -- only ground truth when the source it embedded from is MB-declared
+        -- (A) or confirmed (C, incl. corroborated promotions). B-anchored
+        -- artists wait for the corroborator; coherence-flagged anchors wait
+        -- for a human. Judging against an unverified anchor would compound
+        -- a wrong binding instead of catching it.
+        JOIN platform_identity anchor ON anchor.artist_id = a.id
+          AND anchor.platform = a.embedding_source
+          AND anchor.binding_tier IN ('A', 'C')
         WHERE ri.kind = 'source_binding' AND ri.status = 'pending'
           AND ri.reason NOT IN ('mb_shared_url', 'source_coherence')
           AND ri.evidence ? 'candidates'
           AND NOT (ri.evidence ? 'url_collision') AND NOT (ri.evidence ? 'fp_collision')
           AND COALESCE((ri.evidence->>'adjudicated')::bool, false) IS NOT TRUE
+          AND NOT EXISTS (SELECT 1 FROM review_item f WHERE f.subject_id = ri.subject_id
+                          AND f.reason = 'source_coherence' AND f.status = 'pending')
         ORDER BY ri.created_at, ri.id LIMIT %s
         """,
         (model, limit),

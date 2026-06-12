@@ -26,11 +26,17 @@ class VecEmbedder:
         return [json.loads(open(c.path).read()) for c in clips]
 
 
-def _artist(conn, name, tail):
+def _artist(conn, name, tail, *, anchor_tier="A"):
     a = conn.execute(
         "INSERT INTO artist (display_name, mbid, embedding_source) VALUES (%s, %s, 'deezer') RETURNING id",
         (name, MBID[:-4] + tail),
     ).fetchone()[0]
+    # the ANCHOR: the identity the centroid was embedded from — adjudication
+    # is only sound when this is trusted (A/C), the operator's 2026-06-12 catch
+    conn.execute(
+        "INSERT INTO platform_identity (artist_id, platform, platform_id, page_type, binding_tier) "
+        "VALUES (%s, 'deezer', %s, 'artist', %s)", (a, f"zz-anchor-{tail}", anchor_tier),
+    )
     conn.execute(
         "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
         "VALUES (%s, 'mock-model', 2, '[1,0]', 4, 1.0)", (a,),
@@ -153,6 +159,29 @@ def test_nan_cosine_is_unprobeable_not_poison(conn, probes):
     assert ev["candidates"][0]["acoustic"] is None  # stored as null, not NaN
 
 
+def test_untrusted_anchor_blocks_adjudication(conn, probes):
+    # The operator's catch: the centroid is only ground truth if the source
+    # it was embedded from is trusted (A/C or corroborated). A B-tier
+    # anchored artist must wait for the corroborator — judging candidates
+    # against an unverified anchor compounds a possible wrong binding.
+    a = _artist(conn, "Adj Unsound", "0008", anchor_tier="B")
+    _item(conn, a, [{"name": "X", "platform_id": "p-x", "popularity": 1}])
+    probes["p-x"] = [0.99, 0.01]  # would confirm — but must never be judged
+    out = adjudicate_pending(conn, embedder=VecEmbedder(), fetch=probes["_fetch"], model="mock-model")
+    assert out["processed"] == 0
+
+
+def test_coherence_flagged_anchor_blocks_adjudication(conn, probes):
+    a = _artist(conn, "Adj Flagged", "0009")  # A anchor, but sources disagree
+    _item(conn, a, [{"name": "Y", "platform_id": "p-y", "popularity": 1}])
+    conn.execute(
+        "INSERT INTO review_item (kind, subject_type, subject_id, reason, evidence, status) "
+        "VALUES ('source_binding','artist',%s,'source_coherence','{}','pending')", (a,))
+    probes["p-y"] = [0.99, 0.01]
+    out = adjudicate_pending(conn, embedder=VecEmbedder(), fetch=probes["_fetch"], model="mock-model")
+    assert out["processed"] == 0
+
+
 def test_poller_carries_auto_method_into_binding(conn):
     from pipeline.review_poller import apply_approved_bindings
 
@@ -160,14 +189,14 @@ def test_poller_carries_auto_method_into_binding(conn):
     conn.execute(
         "INSERT INTO review_item (kind, subject_type, subject_id, reason, evidence, status) "
         "VALUES ('source_binding','artist',%s,'x',%s,'approved')",
-        (a, json.dumps({"platform": "deezer", "candidates": [],
-                        "decision": {"platform": "deezer", "platform_id": "990300",
+        (a, json.dumps({"platform": "bandcamp", "candidates": [],
+                        "decision": {"platform": "bandcamp", "platform_id": "zz-adj-poll",
                                      "method": "auto_coherence", "cosine": 0.91}})),
     )
     apply_approved_bindings(conn)
     tier, ev = conn.execute(
         "SELECT binding_tier, binding_evidence FROM platform_identity "
-        "WHERE artist_id=%s AND platform='deezer'", (a,)).fetchone()
+        "WHERE artist_id=%s AND platform='bandcamp'", (a,)).fetchone()
     assert tier == "C"
     assert ev["method"] == "auto_coherence"
     assert ev["cosine"] == 0.91
