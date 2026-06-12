@@ -32,7 +32,7 @@ from pathlib import Path
 
 from psycopg import Connection
 
-TITLE_TABLES = {"recording": 9, "artist_credit_name": 4}
+TITLE_TABLES = {"recording": 9, "artist_credit_name": 5}
 STOP_TITLES = {"intro", "outro", "untitled", "interlude", "skit", "bonus", "bonus track", "demo", "live"}
 CONFIRM_MATCHES = 3
 REFUTE_MIN_EACH_SIDE = 5
@@ -45,7 +45,8 @@ def ensure_title_tables(conn: Connection, *, schema: str = "mb_raw") -> None:
             comment text, edits_pending int, last_updated text, video text)""")
     conn.execute(f"""
         CREATE TABLE IF NOT EXISTS {schema}.artist_credit_name (
-            artist_credit bigint, position int, artist bigint, name text)""")
+            artist_credit bigint, position int, artist bigint, name text,
+            join_phrase text)""")
 
 
 def index_title_tables(conn: Connection, *, schema: str = "mb_raw") -> None:
