@@ -116,6 +116,11 @@ def publish_incremental(factory: Connection, app: Connection, limit: int = 10000
         from pipeline.slop_detect import gate_unevaluated
 
         gated = gate_unevaluated(factory, [r[0] for r in rows])
+        # keyset advance comes from the PRE-filter batch: an all-flagged
+        # batch leaves rows empty, and rows[-1] would crash the hourly sync
+        # (caught by the end-to-end choke test before it ever ran live)
+        after = rows[-1][0]
+        full_batch = len(rows) == limit
         if gated["flagged"]:
             flagged_now = {r[0] for r in factory.execute(
                 """SELECT subject_id FROM review_item WHERE reason='ai_slop'
@@ -124,8 +129,7 @@ def publish_incremental(factory: Connection, app: Connection, limit: int = 10000
             rows = [r for r in rows if r[0] not in flagged_now]
         publish_rows(factory, app, rows)
         n += len(rows)
-        after = rows[-1][0]
-        if len(rows) < limit:
+        if not full_batch:
             break
     for (aid, mbid) in factory.execute(
         "SELECT artist_id, mbid::text FROM ban_ledger WHERE banned_at >= %s", (wm,)

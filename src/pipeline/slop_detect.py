@@ -56,8 +56,11 @@ def score_artist(conn: Connection, artist_id) -> dict:
     if len(set(durations)) <= 1:
         durations = []
     titles = [r[1] for r in rows if r[1]]
-    out = {"n_tracks": len(rows), "score": 0.0, "duration_cv": None,
-           "numbered_ratio": None, "dup_title_ratio": None}
+    total_tracks = conn.execute(
+        "SELECT count(*) FROM audio_track WHERE artist_id = %s", (artist_id,)
+    ).fetchone()[0]
+    out = {"n_tracks": len(rows), "total_tracks": total_tracks, "score": 0.0,
+           "duration_cv": None, "numbered_ratio": None, "dup_title_ratio": None}
     if len(rows) < MIN_TRACKS:
         return out
     score = 0.0
@@ -150,6 +153,9 @@ def gate_unevaluated(conn: Connection, artist_ids: list, *,
     out = {"evaluated": 0, "flagged": 0}
     for aid in stale:
         s = score_artist(conn, aid)
+        # staleness compares against ALL tracks (the same count the stale
+        # query uses) — storing the embed-source-only count re-evaluated
+        # every multi-platform artist every cycle, forever
         conn.execute(
             """
             INSERT INTO slop_evaluation (artist_id, score, n_tracks, features)
@@ -158,7 +164,7 @@ def gate_unevaluated(conn: Connection, artist_ids: list, *,
               n_tracks = EXCLUDED.n_tracks, features = EXCLUDED.features,
               evaluated_at = now()
             """,
-            (aid, s["score"], s["n_tracks"], json.dumps(s)))
+            (aid, s["score"], s.get("total_tracks", s["n_tracks"]), json.dumps(s)))
         out["evaluated"] += 1
         if s["score"] >= threshold:
             seen = conn.execute(

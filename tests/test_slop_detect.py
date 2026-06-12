@@ -199,3 +199,36 @@ def test_catalog_growth_triggers_reevaluation(conn):
     second = conn.execute(
         "SELECT n_tracks FROM slop_evaluation WHERE artist_id=%s", (a,)).fetchone()
     assert second[0] > first[0]
+
+
+def test_publish_incremental_gates_and_survives_all_flagged_batch(conn):
+    """END-TO-END choke-point wiring (the prior test bypassed publish):
+    a farm in the publishable batch must be flagged + dropped INSIDE
+    publish_incremental — including the degenerate batch where EVERY row
+    gets flagged (the empty-list tail must not crash the keyset advance)."""
+    from pipeline.publish import publish_incremental
+
+    conn.execute("""
+        CREATE TEMP TABLE IF NOT EXISTS artists (
+            id uuid PRIMARY KEY, mbid text UNIQUE, name text NOT NULL, slug text,
+            tags jsonb, audio_embedding text, signal_ratio real, embedding_source text,
+            perceptual jsonb, language text, location text,
+            audio_embedding_updated timestamptz, created_at timestamptz,
+            deezer_url text, bandcamp_url text, soundcloud_url text,
+            youtube_url text, tidal_url text) ON COMMIT DROP""")
+    a = _artist_with_catalog(
+        conn, "pubfarm",
+        [199, 201, 200, 200, 202, 198, 200, 201, 199, 200, 200, 201],
+        [f"White Noise Loop {i}" for i in range(12)])
+    conn.execute(
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio, computed_at) "
+        "VALUES (%s, 'mock-model', 2, '[1,0]', 4, 1.0, now())", (a,))
+    conn.execute("UPDATE publish_watermark SET last_run = now() - interval '1 hour' WHERE id='default'")
+    # the farm is the ONLY changed artist: the whole batch gets flagged —
+    # this is the rows[-1] empty-tail shape
+    n = publish_incremental(conn, conn, limit=5)
+    assert conn.execute(
+        "SELECT count(*) FROM review_item WHERE subject_id=%s AND reason='ai_slop' AND status='pending'",
+        (a,)).fetchone()[0] == 1
+    assert conn.execute(
+        "SELECT count(*) FROM artists WHERE id = %s", (a,)).fetchone()[0] == 0  # never published
