@@ -16,12 +16,13 @@ from pipeline.mb_bootstrap import PLATFORM_PATTERNS, derive_identities, load_mbd
 # MB row ids. GIDs and platform ids are FULLY SYNTHETIC (no real MBIDs, no real
 # platform ids): the test DB doubles as the factory DB holding real bootstrap
 # data, and fixture rows must never collide with real rows on any unique key.
-A_BURIAL, A_HOMEPAGE_ONLY, A_ENDED_REL, A_MULTI = 1, 2, 3, 4
+A_BURIAL, A_HOMEPAGE_ONLY, A_ENDED_REL, A_MULTI, A_DUP = 1, 2, 3, 4, 5
 GID = {
     A_BURIAL: "00000000-feed-4bad-9bad-000000000001",
     A_HOMEPAGE_ONLY: "00000000-feed-4bad-9bad-000000000002",
     A_ENDED_REL: "00000000-feed-4bad-9bad-000000000003",
     A_MULTI: "00000000-feed-4bad-9bad-000000000004",
+    A_DUP: "00000000-feed-4bad-9bad-000000000005",
 }
 
 
@@ -53,6 +54,8 @@ def _build(tmp_path: Path) -> Path:
         artist_row(A_HOMEPAGE_ONLY, "Nowhere Man"),
         artist_row(A_ENDED_REL, "Gone Cat"),
         artist_row(A_MULTI, "Everywhere Band"),
+        # shares A_MULTI's soundcloud page — the MB-duplicate-artist class
+        artist_row(A_DUP, "Everywhere Band (dup)"),
     ])
     # url: id gid url edits_pending last_updated (5)
     _w(d, "url", [
@@ -109,6 +112,7 @@ def _build(tmp_path: Path) -> Path:
         ["306", "206", str(A_MULTI), "16", "0", "\\N", "0", "", ""],
         ["307", "207", str(A_BURIAL), "17", "0", "\\N", "0", "", ""],
         ["308", "208", str(A_BURIAL), "18", "0", "\\N", "0", "", ""],
+        ["309", "204", str(A_DUP), "14", "0", "\\N", "0", "", ""],  # SAME sc url as 304
     ])
     # artist_tag: artist tag count last_updated (4)  /  tag: id name ref_count (3)
     _w(d, "tag", [["400", "dubstep", "1"], ["401", "electronic", "1"]])
@@ -140,15 +144,15 @@ def loaded(conn, dump_dir):
 
 
 def test_load_row_counts(loaded):
-    for table, n in [("artist", 4), ("url", 9), ("link_type", 6), ("link", 9),
-                     ("l_artist_url", 9), ("tag", 2), ("artist_tag", 2), ("artist_alias", 1),
+    for table, n in [("artist", 5), ("url", 9), ("link_type", 6), ("link", 9),
+                     ("l_artist_url", 10), ("tag", 2), ("artist_tag", 2), ("artist_alias", 1),
                      ("genre", 2), ("genre_alias", 2)]:
         assert loaded.execute(f"SELECT count(*) FROM mb_raw.{table}").fetchone()[0] == n, table
 
 
 def test_load_is_idempotent_refresh(loaded, dump_dir):
     load_mbdump(loaded, dump_dir)  # refresh = truncate + reload, not append
-    assert loaded.execute("SELECT count(*) FROM mb_raw.artist").fetchone()[0] == 4
+    assert loaded.execute("SELECT count(*) FROM mb_raw.artist").fetchone()[0] == 5
 
 
 # The dev/test DB may also hold REAL bootstrap data (it's the factory DB), so
@@ -213,7 +217,12 @@ def test_derive_multi_platform_artist_one_row(loaded):
         "SELECT count(*) FROM platform_identity pi JOIN artist a ON a.id=pi.artist_id WHERE a.mbid=%s::uuid",
         (GID[A_MULTI],),
     ).fetchone()[0]
-    assert (n_art, n_ids) == (1, 3)  # soundcloud + youtube + tidal
+    sc_owner = loaded.execute(
+        "SELECT count(*) FROM platform_identity WHERE platform='soundcloud' AND platform_id='zz-test-everywhere'"
+    ).fetchone()[0]
+    assert n_art == 1
+    assert sc_owner == 1  # shared page: exactly ONE owner (A_MULTI or A_DUP)
+    assert n_ids in (2, 3)  # youtube + tidal, +soundcloud only if A_MULTI won
 
 
 def test_derive_is_idempotent(loaded):
@@ -222,7 +231,7 @@ def test_derive_is_idempotent(loaded):
     n_artists = loaded.execute(
         "SELECT count(*) FROM artist WHERE mbid = ANY(%s::uuid[])", (_FIXTURE_GIDS,)
     ).fetchone()[0]
-    assert n_artists == 2  # A_BURIAL + A_MULTI; homepage-only and ended-rel never derive
+    assert n_artists == 3  # A_BURIAL + A_MULTI + A_DUP; homepage-only and ended-rel never derive
     before = _fixture_identities(loaded)
     derive_identities(loaded)
     assert _fixture_identities(loaded) == before
@@ -230,3 +239,37 @@ def test_derive_is_idempotent(loaded):
 
 def test_platform_patterns_cover_locked_platforms():
     assert {"deezer", "bandcamp", "soundcloud", "youtube", "tidal", "apple_music", "qobuz"} <= set(PLATFORM_PATTERNS)
+
+
+def test_shared_url_loser_files_duplicate_artist_evidence(loaded):
+    """Two MB artists declaring ONE platform page = duplicate-artist evidence.
+    The identity slot is unique (one page, one owner) — but the losing claim
+    must NOT vanish (2026-06-12: ~6,950 silently dropped claims sent operators
+    hand-disambiguating pages MB explicitly declares). The loser gets a
+    review_item comparison card pointing at the winner."""
+    derive_identities(loaded)
+    owner = loaded.execute(
+        "SELECT artist_id FROM platform_identity WHERE platform='soundcloud' "
+        "AND platform_id='zz-test-everywhere'"
+    ).fetchone()
+    assert owner is not None
+    rows = loaded.execute(
+        """SELECT ri.subject_id, ri.reason, ri.evidence->'url_collision'->>'other_artist',
+                  ri.evidence->>'platform'
+           FROM review_item ri JOIN artist a ON a.id = ri.subject_id
+           WHERE ri.kind='source_binding' AND ri.reason='mb_shared_url'
+             AND a.mbid IN (%s, %s)""",
+        (GID[A_MULTI], GID[A_DUP]),
+    ).fetchall()
+    assert len(rows) == 1
+    subject, reason, other, platform = rows[0]
+    assert subject != owner[0]  # the LOSER holds the review item
+    assert other == str(owner[0])  # ...pointing at the winner
+    assert platform == "soundcloud"
+
+    # idempotent: re-derive must not file a second item
+    derive_identities(loaded)
+    n = loaded.execute(
+        "SELECT count(*) FROM review_item WHERE kind='source_binding' AND reason='mb_shared_url'"
+    ).fetchone()[0]
+    assert n == 1

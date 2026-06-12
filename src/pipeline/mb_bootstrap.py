@@ -134,6 +134,33 @@ def derive_identities(conn: Connection, *, schema: str = "mb_raw") -> dict[str, 
         """,
         params,
     )
+    # Losing claims must not vanish (the (Nit)neroc class, 2026-06-12): when
+    # 2+ MB artists declare ONE platform page, the slot's unique key gives the
+    # page one owner and ON CONFLICT silently dropped every other claim —
+    # ~6,950 of them corpus-wide — orphaning artists into search-binding and
+    # making operators hand-disambiguate pages MB explicitly declares. A
+    # shared URL is duplicate-artist evidence: file the loser a comparison
+    # card pointing at the winner (renders like the fp-collision cards).
+    conn.execute(
+        matched_cte + """
+        INSERT INTO review_item (kind, subject_type, subject_id, reason, evidence, status)
+        SELECT DISTINCT ON (loser.id, m.platform)
+               'source_binding', 'artist', loser.id, 'mb_shared_url',
+               jsonb_build_object(
+                 'platform', m.platform, 'query', m.url, 'shared_url', m.url,
+                 'url_collision', jsonb_build_object('other_artist', pi.artist_id::text)),
+               'pending'
+        FROM matched m
+        JOIN artist loser ON loser.mbid = m.mbid
+        JOIN platform_identity pi ON pi.platform = m.platform
+          AND pi.platform_id = m.platform_id AND pi.artist_id != loser.id
+        WHERE NOT EXISTS (
+          SELECT 1 FROM review_item ri
+          WHERE ri.kind = 'source_binding' AND ri.reason = 'mb_shared_url'
+            AND ri.subject_id = loser.id AND ri.evidence->>'platform' = m.platform)
+        """,
+        params,
+    )
     return dict(
         conn.execute(
             "SELECT platform, count(*) FROM platform_identity GROUP BY platform ORDER BY platform"
