@@ -178,20 +178,29 @@ def test_searcher_error_skips_without_verdict(conn):
 # ---- 3d v2: the typo tier (mined from the old fleet's proven scoring) -------
 
 
-def test_typo_tier_binds_unique_single_edit(conn):
-    # 'Slowdive' vs candidate 'Slowdiv' (one deletion) — unique fuzzy → B
+def test_typo_tier_unique_files_review_never_binds(conn):
+    # POISONED WELL (2026-06-12, Echonine→'Echoline'): edit-distance-1 is NOT
+    # identity evidence — measured ~85% of unique-typo auto-binds were a
+    # DIFFERENT artist one character away (Daru Jones→Dark Jones, Aly Baig→
+    # Aly Bain), and 77 centroids embedded the wrong artist's audio. A unique
+    # typo candidate now ALWAYS files a review item; only a human (or future
+    # fingerprint corroboration) may confirm it.
     from pipeline.search_bind import bind_artist_on_platform
 
-    a = _artist(conn, name="Slowdive", mbid="00000000-feed-4bad-9bad-000000000894")
+    a = _artist(conn, name="Echonine", mbid="00000000-feed-4bad-9bad-000000000894")
     v = bind_artist_on_platform(
-        conn, str(a), "Slowdive", "deezer",
-        searcher=_searcher([{"name": "Slowdiv", "platform_id": "990095", "popularity": 10}]),
+        conn, str(a), "Echonine", "deezer",
+        searcher=_searcher([{"name": "Echoline", "platform_id": "990095", "popularity": 10}]),
     )
-    assert v == "bound"
-    ev = conn.execute(
-        "SELECT binding_evidence FROM platform_identity WHERE artist_id = %s", (a,)
-    ).fetchone()[0]
-    assert ev["method"] == "search_typo1"  # fuzzy binds are MARKED in evidence
+    assert v == "review"
+    assert conn.execute(
+        "SELECT count(*) FROM platform_identity WHERE artist_id = %s", (a,)
+    ).fetchone()[0] == 0  # NO identity row — nothing to poison
+    reason, ev = conn.execute(
+        "SELECT reason, evidence FROM review_item WHERE subject_id = %s AND status='pending'", (a,)
+    ).fetchone()
+    assert "typo" in reason
+    assert ev["candidates"][0]["platform_id"] == "990095"  # recoverable by hand
 
 
 def test_typo_tier_never_containment(conn):
@@ -240,7 +249,7 @@ def test_typo_tier_multiple_fuzzy_goes_to_review(conn):
 
 def test_rescore_upgrades_none_verdicts(conn):
     # v2's re-pass: 'none' ledger rows re-evaluated (cached responses → free);
-    # a typo candidate that v1 ignored now binds, and the ledger upgrades.
+    # a typo candidate that v1 ignored now surfaces FOR REVIEW (never binds).
     from pipeline.search_bind import bind_artist_on_platform, rescore_none_verdicts
 
     a = _artist(conn, name="Hexvoid", mbid="00000000-feed-4bad-9bad-000000000898")
@@ -253,4 +262,4 @@ def test_rescore_upgrades_none_verdicts(conn):
     verdict = conn.execute(
         "SELECT verdict FROM search_attempt WHERE artist_id = %s AND platform = 'bandcamp'", (a,)
     ).fetchone()[0]
-    assert verdict == "bound"
+    assert verdict == "review"  # typo upgrades go to REVIEW, never auto-bind

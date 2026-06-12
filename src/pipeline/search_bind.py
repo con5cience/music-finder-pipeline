@@ -152,10 +152,16 @@ def bind_artist_on_platform(
         typo = [c for c in candidates
                 if any(_edit1(normalize_name(c["name"]), k) for k in keys)]
         if typo:
-            exact = typo  # same downstream policy: unique → bind, multi → review
+            # POISONED WELL (2026-06-12): edit distance is NOT identity
+            # evidence. The old policy auto-bound a UNIQUE typo candidate;
+            # measured ~85% were a different artist one character away and
+            # 77 centroids embedded the wrong act's audio. Typo candidates
+            # now ALWAYS go to review — a human (or, later, fingerprint
+            # corroboration) confirms; the binder never guesses.
+            exact = typo
             method = "search_typo1"
 
-    if len(exact) == 1:
+    if len(exact) == 1 and method == "search_exact_unique":
         c = exact[0]
         evidence = {
             "method": method, "query": display_name,
@@ -172,14 +178,16 @@ def bind_artist_on_platform(
             (artist_id, platform, c["platform_id"], json.dumps(evidence)),
         )
         verdict = "bound"
-    elif len(exact) >= 2:
+    elif exact:  # 2+ exact-name candidates, or ANY typo-tier candidates
+        reason = (f"{len(exact)} edit-distance-1 (typo-tier) candidates on {platform}"
+                  if method == "search_typo1"
+                  else f"{len(exact)} exact-name candidates on {platform}")
         conn.execute(
             """
             INSERT INTO review_item (kind, subject_type, subject_id, reason, evidence, status)
             VALUES ('source_binding', 'artist', %s, %s, %s, 'pending')
             """,
-            (artist_id,
-             f"{len(exact)} exact-name candidates on {platform}",
+            (artist_id, reason,
              json.dumps({"platform": platform, "query": display_name, "candidates": exact})),
         )
         verdict = "review"
