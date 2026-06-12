@@ -136,3 +136,20 @@ def test_degenerate_single_duration_value_is_void(conn):
                              [f"Mix {i}" for i in range(12)])
     s = score_artist(conn, a)
     assert s["duration_cv"] is None
+
+
+def test_logistic_probe_separates_synthetic_clouds():
+    import numpy as np
+    from pipeline.ai_probe import logistic_probe
+
+    rng = np.random.default_rng(7)
+    a = rng.normal(0.5, 1.0, (600, 32))   # shifted cloud
+    b = rng.normal(-0.5, 1.0, (600, 32))
+    out = logistic_probe(a, b)
+    assert out["auc"] > 0.95
+
+    # identical distributions: probe must NOT hallucinate separation
+    c = rng.normal(0, 1, (600, 32))
+    d = rng.normal(0, 1, (600, 32))
+    out2 = logistic_probe(c, d)
+    assert 0.35 < out2["auc"] < 0.65

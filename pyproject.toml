@@ -94,6 +94,7 @@ adjudicate = "python -m pipeline.adjudicate"   # acoustic auto-adjudication of p
 corroborate = "python -m pipeline.corroborate"   # verify single-source B-tier bindings vs MB-declared pages (GPU; never alongside adjudicate)
 title-corroborate = "python -m pipeline.title_corroborate"   # verify audio-unreachable bindings via MB recording titles (no GPU, no probes)
 slop-audit = "python -m pipeline.slop_detect"   # behavioral AI-slop sweep (flag-only -> publish/MB freezer)
+ai-probe = "python -m pipeline.ai_probe"   # AI-vs-human linear probe on MuQ embeddings (needs --ai-dir)
 discover = "python -m pipeline.discovery"   # ADR-019 BC discovery (trickle valve via --admit)
 mb-submit = "python -m pipeline.mb_submit"   # MB contribution lane (consent → queue → tags)
 wave3 = "python -m pipeline.wave3"   # gated heads, selected slices only
