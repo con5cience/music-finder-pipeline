@@ -21,3 +21,4 @@ build/
 *.tar.xz
 *.wav
 *.mp3
+.maintenance-window

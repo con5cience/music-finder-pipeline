@@ -9,6 +9,12 @@ export COMPOSE_PROJECT_NAME=music-finder-pipeline  # review finding: /workspace
 ZEROES=0
 sleep 120  # let the fleet boot before judging it
 while true; do
+  if [ -f /workspace/.maintenance-window ]; then
+    echo "$(date -u +%H:%M) doctor: maintenance window open — standing down"
+    ZEROES=0
+    sleep 1800
+    continue
+  fi
   RATE=$(psql "$PIPELINE_DATABASE_URL" -tAc \
     "SELECT count(*) FROM artist_embedding WHERE computed_at > now() - interval '30 minutes'" 2>/dev/null)
   if [ -z "$RATE" ]; then

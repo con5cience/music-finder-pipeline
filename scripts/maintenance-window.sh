@@ -14,12 +14,14 @@ REPORT=/tmp/maintenance-report.txt
 log() { echo "$(date +%H:%M:%S) $*" | tee -a "$LOG"; }
 
 restore_fleet() {
+  rm -f .maintenance-window  # doctor resumes patrol on every exit path
   log "RESTORE: conc back to 2 + worker-gpu up"
   sed -i 's/PIPELINE_GPU_CONCURRENCY: "3"/PIPELINE_GPU_CONCURRENCY: "2"/' compose.yaml || true
   sg docker -c "docker compose up -d worker-gpu" >> "$LOG" 2>&1
 }
 trap restore_fleet EXIT
 
+touch .maintenance-window  # doctor stands down while this exists (repo ro-mounted at /workspace)
 log "=== MAINTENANCE WINDOW OPEN ==="
 sg docker -c "docker compose stop worker-gpu" >> "$LOG" 2>&1
 log "worker-gpu stopped; GPU is ours"
