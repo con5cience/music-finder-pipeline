@@ -154,7 +154,12 @@ def candidate_cosine(conn: Connection, centroid: np.ndarray, platform: str,
 
 def adjudicate_pending(conn: Connection, *, embedder, limit: int = 50,
                        model: str = DEFAULT_MODEL, fetch=None,
-                       confirm: float = CONFIRM, reject: float = REJECT) -> dict:
+                       confirm: float = CONFIRM, reject: float = REJECT,
+                       commit_each: bool = False) -> dict:
+    """commit_each=True for the long live run (crash keeps progress); tests
+    and library callers keep transaction control (the conftest rollback
+    contract — a mid-call commit PERSISTS fixtures into the shared test DB,
+    the 2026-06-12 14-test contamination)."""
     if fetch is None:
         from pipeline.embed_job import fetch_audio as fetch
     items = conn.execute(
@@ -214,7 +219,8 @@ def adjudicate_pending(conn: Connection, *, embedder, limit: int = 50,
             conn.execute("UPDATE review_item SET evidence = %s WHERE id = %s AND status = 'pending'",
                          (json.dumps(evidence), rid))
             out["annotated"] += 1
-        conn.commit()
+        if commit_each:
+            conn.commit()
     out["processed"] = len(items)
     return out
 
@@ -236,7 +242,8 @@ def main() -> None:
     embedder = get_embedder()
     with psycopg.connect(Settings().database_url) as conn:
         print(adjudicate_pending(conn, embedder=embedder, limit=args.limit,
-                                 confirm=args.confirm, reject=args.reject))
+                                 confirm=args.confirm, reject=args.reject,
+                                 commit_each=True))
 
 
 if __name__ == "__main__":
