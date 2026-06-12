@@ -105,23 +105,33 @@ def probe_candidate_urls(conn: Connection, platform: str, platform_id: str,
                     if len(urls) >= max_clips:
                         return urls
             return urls
-    except Exception:  # noqa: BLE001 — an unprobeable candidate is just gray
+    except Exception as exc:  # noqa: BLE001 — unprobeable is gray, but NEVER silent
+        import sys
+        print(f"probe {platform}:{platform_id} failed: {exc!r}", file=sys.stderr, flush=True)
         return []
     return []
 
 
 def _center_clip(path: str, workdir: Path) -> str | None:
-    """A centered <=30s wav slice — previews pass through, full tracks trim."""
+    """A centered <=30s MONO WAV — always re-encoded, never a pass-through.
+    Production embedders only ever see prep-staged wavs; feeding raw mp3
+    plus fp16 autocast produced all-NaN vectors on the host (2026-06-12)."""
+    import numpy as np
     import soundfile as sf
 
     try:
         info = sf.info(path)
-        if info.duration <= _CLIP_S + 1:
-            return path
-        start = int((info.duration - _CLIP_S) / 2 * info.samplerate)
-        data, sr = sf.read(path, start=start, frames=int(_CLIP_S * info.samplerate))
+        start = 0
+        frames = -1
+        if info.duration > _CLIP_S + 1:
+            start = int((info.duration - _CLIP_S) / 2 * info.samplerate)
+            frames = int(_CLIP_S * info.samplerate)
+        data, sr = sf.read(path, start=start, frames=frames, dtype="float32", always_2d=True)
+        mono = data.mean(axis=1)
+        if not np.isfinite(mono).all():
+            return None
         out = str(workdir / (Path(path).stem + "-c30.wav"))
-        sf.write(out, data, sr)
+        sf.write(out, mono, sr)
         return out
     except Exception:  # noqa: BLE001
         return None
@@ -138,7 +148,9 @@ def candidate_cosine(conn: Connection, centroid: np.ndarray, platform: str,
             clip = _center_clip(raw, workdir)
             if clip:
                 clips.append(clip)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            import sys
+            print(f"clip fetch {platform_id} failed: {exc!r}", file=sys.stderr, flush=True)
             continue
     if not clips:
         return None
@@ -240,6 +252,11 @@ def main() -> None:
     ap.add_argument("--confirm", type=float, default=CONFIRM)
     ap.add_argument("--reject", type=float, default=REJECT)
     args = ap.parse_args()
+    import os
+
+    # fp16 autocast NaN'd on ~30s probe clips on the host (parity was only
+    # ever proven on 10s synthetics. Probe volume is small: fp32 is cheap.)
+    os.environ.setdefault("PIPELINE_FP16", "0")
     from pipeline.embedders.registry import get_embedder
 
     embedder = get_embedder()
