@@ -116,7 +116,50 @@ def publish_incremental(factory: Connection, app: Connection, limit: int = 10000
     ).fetchall():
         app.execute("DELETE FROM artists WHERE id = %s OR (mbid IS NOT NULL AND mbid = %s)",
                     (str(aid) if aid else "00000000-0000-0000-0000-000000000000", mbid))
+    prune_lost_embeddings(factory, app)
     return n
+
+
+def prune_lost_embeddings(factory: Connection, app: Connection, batch: int = 10000) -> int:
+    """Remove serving rows whose factory artist no longer has an embedding.
+
+    The poisoned-well gap (2026-06-12): publish only upserts embedded artists
+    and deletes banned ones — a RESET embedding (binding remediation, NaN
+    purges) silently stranded its stale row + vector on the serving side
+    forever. Conservative by construction: only rows whose artist factory
+    POSITIVELY KNOWS (matched by mbid or id) and which have zero embeddings
+    are deleted; anything factory can't match is left alone."""
+    pruned = 0
+    last = None
+    while True:
+        rows = app.execute(
+            "SELECT id::text, mbid FROM artists"
+            + (" WHERE id > %s" if last is not None else "")
+            + " ORDER BY id LIMIT %s",
+            ((last, batch) if last is not None else (batch,)),
+        ).fetchall()
+        if not rows:
+            break
+        ids = [r[0] for r in rows]
+        mbids = [r[1] for r in rows]
+        victims = [r[0] for r in factory.execute(
+            """
+            SELECT x.app_id
+            FROM unnest(%s::text[], %s::text[]) AS x(app_id, mbid)
+            JOIN artist a ON (x.mbid IS NOT NULL AND a.mbid = x.mbid::uuid)
+                          OR a.id::text = x.app_id
+            WHERE NOT EXISTS (SELECT 1 FROM artist_embedding e WHERE e.artist_id = a.id)
+            """,
+            (ids, mbids),
+        ).fetchall()]
+        if victims:
+            pruned += app.execute(
+                "DELETE FROM artists WHERE id = ANY(%s::uuid[])", (victims,)
+            ).rowcount
+        last = ids[-1]
+        if len(rows) < batch:
+            break
+    return pruned
 
 
 def artist_language(conn: Connection, artist_id) -> str | None:

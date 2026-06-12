@@ -210,3 +210,40 @@ def test_incremental_drain_advances_keyset(conn):
     n = publish_incremental(conn, conn, limit=2)  # 5 changed, window of 2
     assert n == 5  # 3 keyset pages, no infinite loop, full drain
     assert conn.execute("SELECT count(*) FROM artists WHERE name LIKE 'Drain %'").fetchone()[0] == 5
+
+
+def test_incremental_prunes_rows_whose_embedding_was_reset(conn):
+    """The poisoned-well gap (2026-06-12): publish only UPSERTS embedded
+    artists and deletes only banned ones — an artist whose embedding is
+    RESET (centroid pollution remediation, NaN purges) silently drops out
+    of the publishable set while its stale serving row + vector live
+    forever. The hourly sync now prunes serving rows whose factory artist
+    has no embedding. Rows factory doesn't know are NEVER touched."""
+    from pipeline.publish import publish_incremental
+
+    _serving_schema(conn)
+    mb_reset = "00000000-feed-4bad-9bad-000000000ab1"
+    a = conn.execute(
+        "INSERT INTO artist (display_name, mbid, embedding_source) VALUES "
+        "('Reset Case', %s, 'deezer') RETURNING id", (mb_reset,)).fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
+        "VALUES (%s, 'mock-model', 2, '[1,0]', 3, 1.0)", (a,))
+    conn.execute(
+        "INSERT INTO artists (id, mbid, name, slug) VALUES (%s, %s, 'Reset Case', 'reset-case')",
+        (a, mb_reset))
+    # a row factory has never heard of — must survive every prune
+    conn.execute(
+        "INSERT INTO artists (id, mbid, name, slug) VALUES "
+        "('00000000-feed-4bad-9bad-0000000fffff', NULL, 'Foreign Row', 'foreign-row')")
+    conn.execute("UPDATE publish_watermark SET last_run = now() WHERE id = 'default'")
+
+    publish_incremental(conn, conn)
+    assert conn.execute("SELECT count(*) FROM artists WHERE name='Reset Case'").fetchone()[0] == 1
+
+    # the remediation: embedding reset → next sync removes the stale row
+    conn.execute("DELETE FROM artist_embedding WHERE artist_id = %s", (a,))
+    conn.execute("UPDATE artist SET embedding_source = NULL WHERE id = %s", (a,))
+    publish_incremental(conn, conn)
+    assert conn.execute("SELECT count(*) FROM artists WHERE name='Reset Case'").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM artists WHERE name='Foreign Row'").fetchone()[0] == 1
