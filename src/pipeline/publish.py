@@ -83,10 +83,11 @@ def publishable_artists(conn: Connection, limit: int, since=None, after_id=None)
         WHERE a.embedding_source IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM ban_ledger b WHERE b.artist_id = a.id
                           OR (a.mbid IS NOT NULL AND b.mbid = a.mbid))
-          -- coherence gate (2026-06-12): an open acoustic-disagreement flag
-          -- holds the artist from serving until a human names the impostor
+          -- integrity freezer (2026-06-12): open acoustic-disagreement or
+          -- AI-slop flags hold the artist from serving until a human looks
           AND NOT EXISTS (SELECT 1 FROM review_item ri WHERE ri.subject_id = a.id
-                          AND ri.reason = 'source_coherence' AND ri.status = 'pending')
+                          AND ri.reason IN ('source_coherence', 'ai_slop')
+                          AND ri.status = 'pending')
           {since_sql}
           {after_sql}
         ORDER BY a.id LIMIT %(limit)s
