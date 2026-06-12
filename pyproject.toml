@@ -91,6 +91,7 @@ coherence = "python -m pipeline.coherence"   # cross-source binding validator (f
 binding-audit = "python -m pipeline.binding_audit"   # provenance distribution + integrity flags report
 dataset-audit = "python -m pipeline.dataset_audit"   # whole-dataset cleanliness sweep (read-only)
 adjudicate = "python -m pipeline.adjudicate"   # acoustic auto-adjudication of pending candidate bindings (GPU; run in a window)
+corroborate = "python -m pipeline.corroborate"   # verify single-source B-tier bindings vs MB-declared pages (GPU; never alongside adjudicate)
 discover = "python -m pipeline.discovery"   # ADR-019 BC discovery (trickle valve via --admit)
 mb-submit = "python -m pipeline.mb_submit"   # MB contribution lane (consent → queue → tags)
 wave3 = "python -m pipeline.wave3"   # gated heads, selected slices only
