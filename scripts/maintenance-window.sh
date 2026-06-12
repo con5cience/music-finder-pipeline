@@ -88,7 +88,7 @@ RATE=$($PY -c "
 import psycopg
 c = psycopg.connect('postgresql://pipeline:pipeline@localhost:5440/pipeline')
 print(c.execute(\"SELECT count(*) FROM artist_embedding WHERE computed_at > now() - interval '20 minutes'\").fetchone()[0] * 3)")
-log "conc-3 retest: ~$RATE/hr, OOMs=$OOMS"
+log "conc-3 retest: ~${RATE:-skipped}/hr, OOMs=$OOMS"
 fi
 fi
 # trap restores conc 2 + restarts
@@ -98,7 +98,7 @@ fi
   echo "sweep rc=$SWEEP_RC (0=done, 124=hit 4h cap — rerun to continue, it resumes)"
   grep -E "artists with v2|PARITY|peak MB|VERDICT" "$LOG"
   grep -E '"head"|"done"|"skipped"' "$LOG" | tail -8
-  echo "conc-3 retest: ~$RATE/hr with $OOMS OOMs (fleet restored to conc 2 regardless)"
+  echo "conc-3 retest: ~${RATE:-skipped}/hr with $OOMS OOMs (fleet restored to conc 2 regardless)"
   echo "Full log: $LOG"
 } > "$REPORT"
 log "=== WINDOW CLOSED — report at $REPORT ==="
