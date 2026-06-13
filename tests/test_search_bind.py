@@ -157,6 +157,37 @@ def test_review_poller_skips_pending_and_rejected(conn):
     ).fetchone()[0] == 0
 
 
+def test_homonym_picks_are_taken_and_NOT_bound_as_platforms(conn):
+    # homonym approvals must NOT flow through the binding poller (no platform
+    # to bind) — they go to take_approved_homonym_picks, which returns the
+    # chosen artist for front-running and resolves the item.
+    import json as _json
+    from pipeline.review_poller import apply_approved_bindings, take_approved_homonym_picks
+
+    winner = _artist(conn, name="Tool", mbid="00000000-feed-4bad-9bad-000000000892")
+    loser = _artist(conn, name="Tool", mbid=None)
+    rid = conn.execute(
+        "INSERT INTO review_item (kind, subject_type, subject_id, reason, evidence, status) "
+        "VALUES ('source_binding','artist',%s,'artist_homonym',%s,'approved') RETURNING id",
+        (winner, _json.dumps({
+            "platform": "homonym", "query": "Tool",
+            "candidates": [{"artist_id": str(winner), "name": "Tool"},
+                           {"artist_id": str(loser), "name": "Tool"}],
+            "decision": {"method": "homonym_pick", "chosen_artist": str(winner)}})),
+    ).fetchone()[0]
+    # the binding poller ignores homonym items entirely (no stray identity)
+    assert apply_approved_bindings(conn) == 0
+    assert conn.execute("SELECT count(*) FROM platform_identity WHERE artist_id=%s", (winner,)).fetchone()[0] == 0
+    # the homonym path returns the winner and resolves the item
+    picks = take_approved_homonym_picks(conn)
+    assert picks == [str(winner)]
+    assert conn.execute("SELECT resolved_at IS NOT NULL FROM review_item WHERE id=%s", (rid,)).fetchone()[0]
+    # loser untouched (never embedded/banned by this flow)
+    assert conn.execute("SELECT embedding_source FROM artist WHERE id=%s", (loser,)).fetchone()[0] is None
+    # idempotent: second pass finds nothing
+    assert take_approved_homonym_picks(conn) == []
+
+
 def test_searcher_error_skips_without_verdict(conn):
     # Per-source isolation (mined fleet lesson): a transient upstream error
     # must neither raise out of the caller's loop pattern nor write a ledger
