@@ -75,22 +75,47 @@ def logistic_probe(x_a: np.ndarray, x_b: np.ndarray, *, holdout: float = 0.25,
             "n_train": len(x_tr), "n_holdout": len(x_te)}
 
 
-def embed_dir(ai_dir: str, *, max_clips: int = 4000) -> np.ndarray:
+def embed_dir(ai_dir: str, *, max_clips: int = 4000, chunk: int = 48) -> np.ndarray:
+    """Embed AI audio as CENTERED 30s clips, in chunks.
+
+    Two reasons this is not one big emb.embed() call: (1) SONICS entries are
+    full-length songs — decoding 4000 of them to waveforms at once OOM-killed
+    the process (the silent kill on the first run); (2) the human side is 30s
+    clip embeddings, so for an apples-to-apples probe the AI side must be 30s
+    clips too, not full tracks. _center_clip (the adjudicator's) trims + the
+    chunk loop bounds peak host RAM to `chunk` waveforms."""
     import os
+    import tempfile
 
     os.environ.setdefault("PIPELINE_FP16", "0")  # the 30s NaN law
     from pathlib import Path
 
+    from pipeline.adjudicate import _center_clip
     from pipeline.bench.types import Clip
     from pipeline.embedders.registry import get_embedder
 
     paths = [p for p in sorted(Path(ai_dir).rglob("*"))
              if p.suffix.lower() in (".wav", ".mp3", ".flac", ".ogg")][:max_clips]
     emb = get_embedder()
-    vecs = np.asarray(emb.embed(
-        [Clip(id=str(i), artist_id="ai", path=str(p)) for i, p in enumerate(paths)]
-    ), dtype=np.float32)
-    return vecs[np.isfinite(vecs).all(axis=1)]
+    out: list[np.ndarray] = []
+    with tempfile.TemporaryDirectory(prefix="ai-probe-") as tmp:
+        wd = Path(tmp)
+        for i in range(0, len(paths), chunk):
+            batch = []
+            for j, p in enumerate(paths[i:i + chunk]):
+                clip = _center_clip(str(p), wd)
+                if clip:
+                    batch.append(Clip(id=f"{i}-{j}", artist_id="ai", path=clip))
+            if not batch:
+                continue
+            v = np.asarray(emb.embed(batch), dtype=np.float32)
+            out.append(v[np.isfinite(v).all(axis=1)])
+            for c in batch:  # don't let trimmed wavs accumulate across chunks
+                try:
+                    os.unlink(c.path)
+                except OSError:
+                    pass
+    return np.vstack(out) if out else np.empty((0, 1024), dtype=np.float32)
 
 
 def main() -> None:
