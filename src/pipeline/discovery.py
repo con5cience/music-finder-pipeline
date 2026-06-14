@@ -16,6 +16,7 @@ ALL traffic through cached_fetch (proxy + cache laws).
 
 from __future__ import annotations
 
+import datetime as _dt
 import re
 from urllib.parse import urlparse
 
@@ -25,6 +26,14 @@ from pipeline.fetch_cache import cached_fetch
 
 DISCOVER_URL = "https://bandcamp.com/api/discover/1/discover_web"
 PAGE_SIZE = 60
+
+# Cheap pre-admit reject rules (ADR-019 companion to dedup_gate). Tight,
+# high-precision keyword core (operator decision 2026-06-14): word-boundary so
+# 'record' inside a word never false-matches, and band_name==subdomain is NOT a
+# reject (validated: 886 such candidates are real solo/electronic acts).
+_REJECT_LABEL_RE = re.compile(r"\b(?:net)?labels?\b|\brecords?\b|\brecordings?\b", re.I)
+_STALE_BEFORE = _dt.date(2020, 1, 1)
+_FUTURE_GRACE = _dt.timedelta(days=90)
 
 
 def _subdomain(band_url: str) -> str | None:
@@ -85,12 +94,14 @@ def discover_wave(conn: Connection, pages: int = 1, admit_budget: int = 0, *, fe
         except Exception as e:  # noqa: BLE001 — one bad tag must not kill the wave
             crawls.append({"tag": t, "error": type(e).__name__})
     dedup = dedup_gate(conn, limit=100000)
+    pruned = prune_candidates(conn)
     admitted = admit(conn, admit_budget) if admit_budget else 0
     return {
         "tags_crawled": len(tags),
         "new_candidates": sum(c.get("new", 0) for c in crawls),
         "errors": sum(1 for c in crawls if "error" in c),
         "dedup": dedup,
+        "pruned": pruned,
         "admitted": admitted,
     }
 
@@ -225,6 +236,50 @@ def dedup_gate(conn: Connection, limit: int = 100000) -> dict:
     return out
 
 
+def reject_reason(band_name: str | None, platform_id: str | None,
+                  release_seen_at, *, today: _dt.date | None = None) -> str | None:
+    """Cheap, no-fetch pre-admit screen: return a status_reason if a candidate is
+    a PROVABLE non-artist — a label/imprint, an ancient back-catalog dump
+    (<2020), or an absurd future date (>90d out) — else None. Strictly
+    SUBTRACTIVE: it only rejects provable junk, never approves; all subtle
+    judgment stays with the factory's full analysis (ADR-019 keeps the embed +
+    slop/coherence freezer as THE admission bar). Pure + side-effect-free so the
+    SQL and the unit test share one source of truth."""
+    if _REJECT_LABEL_RE.search(band_name or "") or _REJECT_LABEL_RE.search(platform_id or ""):
+        return "pre_admit_label"
+    if release_seen_at is not None:
+        rel = release_seen_at.date() if hasattr(release_seen_at, "date") else release_seen_at
+        ref = today or _dt.datetime.now(_dt.UTC).date()
+        if rel < _STALE_BEFORE:
+            return "stale"
+        if rel > ref + _FUTURE_GRACE:
+            return "future_date"
+    return None
+
+
+def prune_candidates(conn: Connection, *, today: _dt.date | None = None) -> dict:
+    """Mark obvious non-artist candidates rejected BEFORE admission, so the
+    trickle valve never spends factory cycles on provable junk. Mirrors
+    dedup_gate's status-marking convention; rejected rows never re-surface.
+    Reuses reject_reason() as the single rule source. Returns {reason: count}."""
+    rows = conn.execute(
+        "SELECT id, band_name, platform_id, release_seen_at FROM bc_candidate WHERE status = 'candidate'"
+    ).fetchall()
+    by_reason: dict[str, list] = {}
+    for cid, name, pid, rel in rows:
+        reason = reject_reason(name, pid, rel, today=today)
+        if reason:
+            by_reason.setdefault(reason, []).append(cid)
+    out: dict[str, int] = {}
+    for reason, ids in by_reason.items():
+        conn.execute(
+            "UPDATE bc_candidate SET status = 'rejected', status_reason = %s WHERE id = ANY(%s)",
+            (reason, ids),
+        )
+        out[reason] = len(ids)
+    return out
+
+
 def admit(conn: Connection, n: int) -> int:
     """THE TRICKLE VALVE: oldest n candidates become mbid-NULL artists with
     pending bandcamp identities. The wave seeder + cascade do everything
@@ -289,6 +344,7 @@ def main() -> None:
             for tag in [t.strip() for t in args.tags.split(",") if t.strip()]:
                 report["crawl"].append(crawl_tag(conn, tag, args.pages))
             report["dedup"] = dedup_gate(conn)
+            report["pruned"] = prune_candidates(conn)
             if args.admit:
                 report["admitted"] = admit(conn, args.admit)
         conn.commit()

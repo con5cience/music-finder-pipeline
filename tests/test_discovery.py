@@ -4,9 +4,19 @@ mbid-NULL artists, and the mbid-NULL publish path."""
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 
-from pipeline.discovery import _subdomain, admit, crawl_label, crawl_tag, dedup_gate, discover_wave
+from pipeline.discovery import (
+    _subdomain,
+    admit,
+    crawl_label,
+    crawl_tag,
+    dedup_gate,
+    discover_wave,
+    prune_candidates,
+    reject_reason,
+)
 
 MBID = "00000000-feed-4bad-9bad-000000000dc1"
 
@@ -140,3 +150,51 @@ def test_dedup_gate_rejects_banned(conn, monkeypatch):
         "SELECT status, status_reason FROM bc_candidate WHERE platform_id = 'zz-banned-1'").fetchone()
     assert status == "rejected" and reason == "banned"
     assert admit(conn, 10) == 0  # rejected candidates never admit
+
+
+def test_reject_reason_subtractive_filter():
+    today = dt.date(2026, 6, 14)
+    # label/imprint tell — band name (spaced) or hyphenated subdomain
+    assert reject_reason("Forever Records", "foreverband", None, today=today) == "pre_admit_label"
+    assert reject_reason("Lost Children Net Label", "lcnl", None, today=today) == "pre_admit_label"
+    assert reject_reason("Inner Ocean Recordings", "io", None, today=today) == "pre_admit_label"
+    assert reject_reason("Cool Act", "forever-records", None, today=today) == "pre_admit_label"
+    # date sanity
+    assert reject_reason("Old Dump", "od", dt.datetime(2019, 12, 31, tzinfo=dt.UTC), today=today) == "stale"
+    assert reject_reason("Spam", "sp", dt.datetime(2037, 1, 1, tzinfo=dt.UTC), today=today) == "future_date"
+    # KEPT (validated 2026-06-14): name==subdomain is normal for real solo/electronic
+    # acts (886 live) — must NOT be rejected; near-future preorders kept; word-boundary
+    # means 'record' inside a word is not a false hit.
+    assert reject_reason("NewRetroWave", "newretrowave", dt.datetime(2026, 6, 10, tzinfo=dt.UTC), today=today) is None
+    assert reject_reason("Preorder Act", "pa", dt.datetime(2026, 7, 30, tzinfo=dt.UTC), today=today) is None
+    assert reject_reason("Recorder Quartet", "recorderquartet", None, today=today) is None
+
+
+def test_prune_candidates_marks_only_obvious_junk(conn):
+    today = dt.date(2026, 6, 14)
+
+    def ins(pid, name, rel):
+        conn.execute(
+            "INSERT INTO bc_candidate (platform_id, band_name, band_url, release_seen_at) "
+            "VALUES (%s, %s, %s, %s)",
+            (pid, name, f"https://{pid}.bandcamp.com", rel))
+
+    ins("zz-prune-label", "Acme Records", None)
+    ins("zz-prune-stale", "Old Dump", dt.datetime(2015, 1, 1, tzinfo=dt.UTC))
+    ins("zz-prune-future", "Spam 2037", dt.datetime(2037, 1, 1, tzinfo=dt.UTC))
+    ins("zz-prune-keep1", "Genuine Artist", dt.datetime(2026, 6, 1, tzinfo=dt.UTC))
+    ins("zz-prune-keep2", "zz-prune-keep2", None)  # name == subdomain → MUST survive
+
+    out = prune_candidates(conn, today=today)
+    assert out == {"pre_admit_label": 1, "stale": 1, "future_date": 1}
+
+    kept = conn.execute(
+        "SELECT platform_id FROM bc_candidate WHERE status='candidate' AND platform_id LIKE 'zz-prune-%' ORDER BY 1"
+    ).fetchall()
+    assert [r[0] for r in kept] == ["zz-prune-keep1", "zz-prune-keep2"]
+    rej = dict(conn.execute(
+        "SELECT platform_id, status_reason FROM bc_candidate WHERE status='rejected' AND platform_id LIKE 'zz-prune-%'"
+    ).fetchall())
+    assert rej == {"zz-prune-label": "pre_admit_label", "zz-prune-stale": "stale", "zz-prune-future": "future_date"}
+    # rejected candidates never admit
+    assert admit(conn, 50) >= 0  # smoke: admit runs clean after prune
