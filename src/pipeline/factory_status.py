@@ -16,8 +16,41 @@ from psycopg import Connection
 _WINDOWS = (("10m", "10 minutes"), ("1h", "1 hour"), ("24h", "24 hours"))
 
 
+def _seed_queue(conn: Connection) -> dict:
+    """Pending-to-embed artists, bucketed the way the wave seeder picks them.
+
+    Mirrors wave_seeder.select_seed_batch eligibility (scan_status='pending',
+    embedding_source IS NULL): fast lanes (deezer/bandcamp/soundcloud) before
+    youtube-only, and within each, provisional (mbid NULL = ADR-019 discovery)
+    front-runs MB-bound. An artist with both a fast and a yt pending identity
+    counts under fast (that's the lane that will seed it).
+    """
+    q = {"fast": {"provisional": 0, "mb": 0}, "yt": {"provisional": 0, "mb": 0}}
+    rows = conn.execute(
+        """
+        WITH elig AS (
+          SELECT a.id, (a.mbid IS NULL) AS provisional,
+                 bool_or(pi.platform IN ('deezer','bandcamp','soundcloud')
+                         AND pi.scan_status = 'pending') AS fast_pending,
+                 bool_or(pi.platform = 'youtube'
+                         AND pi.scan_status = 'pending') AS yt_pending
+          FROM artist a JOIN platform_identity pi ON pi.artist_id = a.id
+          WHERE a.embedding_source IS NULL
+          GROUP BY a.id, a.mbid
+        )
+        SELECT CASE WHEN fast_pending THEN 'fast' ELSE 'yt' END AS lane,
+               provisional, count(*)
+        FROM elig WHERE fast_pending OR yt_pending
+        GROUP BY 1, 2
+        """
+    ).fetchall()
+    for lane, provisional, n in rows:
+        q[lane]["provisional" if provisional else "mb"] = n
+    return q
+
+
 def snapshot(conn: Connection) -> dict:
-    out: dict = {"rates": {}, "recent": [], "scans": {}}
+    out: dict = {"rates": {}, "recent": [], "scans": {}, "queue": {}}
     for label, iv in _WINDOWS:
         emb, scans, heads, binds = conn.execute(
             f"""
@@ -47,6 +80,7 @@ def snapshot(conn: Connection) -> dict:
             """
         ).fetchall()
     )
+    out["queue"] = _seed_queue(conn)
     return out
 
 
@@ -59,6 +93,11 @@ def render(s: dict) -> str:
         )
     if s["scans"]:
         lines.append("scan verdicts (1h): " + ", ".join(f"{k}={v}" for k, v in s["scans"].items()))
+    if s.get("queue"):
+        qf, qy = s["queue"]["fast"], s["queue"]["yt"]
+        lines.append("--- seed queue (pending, unembedded) ---")
+        lines.append(f"  tier1 fast (deezer/bc/sc)  provisional={qf['provisional']:>6}  MB-bound={qf['mb']:>8}")
+        lines.append(f"  tier2 youtube-only         provisional={qy['provisional']:>6}  MB-bound={qy['mb']:>8}")
     lines.append("--- last embeds ---")
     for name, src, clips, ratio, at in s["recent"]:
         lines.append(f"  {at}  {str(name)[:28]:28s} {str(src):10s} clips={clips} ratio={ratio}")
