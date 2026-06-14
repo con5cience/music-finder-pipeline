@@ -9,6 +9,7 @@ import json
 
 from pipeline.discovery import (
     _subdomain,
+    adaptive_admit_budget,
     admit,
     crawl_label,
     crawl_tag,
@@ -248,3 +249,14 @@ def test_sweep_provisional_slop_scores_and_freezes(conn):
         "SELECT count(*) FROM slop_evaluation WHERE artist_id IN (%s,%s)", (farm, org)).fetchone()[0] == 2
     # idempotent: nothing new on a second pass
     assert sweep_provisional_slop(conn) == {"evaluated": 0, "flagged": 0}
+
+
+def test_adaptive_admit_budget_throttles_on_backlog(conn):
+    # relative to whatever the DB already holds (robust to shared-DB state)
+    base = conn.execute("SELECT count(*) FROM artist WHERE embedding_source IS NULL").fetchone()[0]
+    for i in range(3):
+        conn.execute("INSERT INTO artist (display_name, mbid) VALUES (%s, NULL)", (f"zz-bk-{i}",))
+    # backlog (base+3) above threshold → small trickle
+    assert adaptive_admit_budget(conn, throttled=5, full=99, backlog_threshold=base + 1) == 5
+    # backlog (base+3) at/below threshold → open up (onboard everything as it comes in)
+    assert adaptive_admit_budget(conn, throttled=5, full=99, backlog_threshold=base + 3) == 99

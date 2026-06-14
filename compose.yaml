@@ -152,6 +152,23 @@ services:
       PIPELINE_DATABASE_URL: postgresql://pipeline:pipeline@localhost:5440/pipeline
       APP_DATABASE_URL: postgresql://musicfinder:musicfinder@localhost:5433/musicfinder
 
+  # ADR-019 standing discovery: crawl Bandcamp's tag tree, prune obvious
+  # non-artists, admit a backlog-throttled trickle (small while the embed
+  # backlog drains, full once clear), and score the provisional cohort for
+  # AI-slop. env_file carries the proxy for the crawl; factory DB only (no
+  # APP_DATABASE_URL — discovery never writes serving). Interval defaults daily.
+  # Start it explicitly: docker compose up -d discover-sync.
+  discover-sync:
+    build: .
+    image: music-finder-pipeline:local
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["while true; do .venv/bin/python -m pipeline.discovery --wave --admit-adaptive; sleep ${DISCOVER_INTERVAL:-86400}; done"]
+    env_file: .env
+    network_mode: host
+    environment:
+      PIPELINE_DATABASE_URL: postgresql://pipeline:pipeline@localhost:5440/pipeline
+
   # The watchdog that outlives every operator session: flatlined embeds for
   # two checks → force-recreate the workers (the wedged-reader class). Needs
   # the docker socket — the ONE privileged mount in the stack, for exactly

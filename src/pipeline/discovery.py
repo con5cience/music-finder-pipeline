@@ -337,6 +337,16 @@ def sweep_provisional_slop(conn: Connection) -> dict:
     return gate_unevaluated(conn, ids)
 
 
+def adaptive_admit_budget(conn: Connection, *, throttled: int = 300,
+                          full: int = 100000, backlog_threshold: int = 10000) -> int:
+    """Self-throttling admit budget (operator decision 2026-06-14): while the
+    embed backlog is still draining (many unembedded artists competing for the
+    GPU), admit a small steady trickle; once the backlog is essentially clear,
+    open up and onboard the whole discovered pool as it comes in."""
+    backlog = conn.execute("SELECT count(*) FROM artist WHERE embedding_source IS NULL").fetchone()[0]
+    return throttled if backlog > backlog_threshold else full
+
+
 def main() -> None:
     import argparse
     import json
@@ -351,14 +361,17 @@ def main() -> None:
     ap.add_argument("--label", default="", help="crawl one label's roster page")
     ap.add_argument("--pages", type=int, default=2)
     ap.add_argument("--admit", type=int, default=0, help="trickle valve: admit N oldest candidates")
+    ap.add_argument("--admit-adaptive", action="store_true",
+                    help="self-throttle the admit budget to the embed backlog (small while draining, full once clear)")
     import sys
 
     argv = [a for i, a in enumerate(sys.argv[1:]) if not (a == "--" and i == 0)]
     args = ap.parse_args(argv)
     report: dict = {"crawl": [], "dedup": None, "admitted": 0}
     with psycopg.connect(Settings().database_url) as conn:
+        admit_n = adaptive_admit_budget(conn) if args.admit_adaptive else args.admit
         if args.wave:
-            report = discover_wave(conn, args.pages, args.admit)
+            report = discover_wave(conn, args.pages, admit_n)
         else:
             if args.label:
                 report["crawl"].append(crawl_label(conn, args.label))
@@ -366,9 +379,11 @@ def main() -> None:
                 report["crawl"].append(crawl_tag(conn, tag, args.pages))
             report["dedup"] = dedup_gate(conn)
             report["pruned"] = prune_candidates(conn)
-            if args.admit:
-                report["admitted"] = admit(conn, args.admit)
+            if admit_n:
+                report["admitted"] = admit(conn, admit_n)
             report["swept"] = sweep_provisional_slop(conn)
+        if args.admit_adaptive:
+            report["admit_budget"] = admit_n
         conn.commit()
     print(json.dumps(report, indent=2, default=str))
 
