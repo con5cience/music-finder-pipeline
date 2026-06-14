@@ -96,6 +96,7 @@ def discover_wave(conn: Connection, pages: int = 1, admit_budget: int = 0, *, fe
     dedup = dedup_gate(conn, limit=100000)
     pruned = prune_candidates(conn)
     admitted = admit(conn, admit_budget) if admit_budget else 0
+    swept = sweep_provisional_slop(conn)
     return {
         "tags_crawled": len(tags),
         "new_candidates": sum(c.get("new", 0) for c in crawls),
@@ -103,6 +104,7 @@ def discover_wave(conn: Connection, pages: int = 1, admit_budget: int = 0, *, fe
         "dedup": dedup,
         "pruned": pruned,
         "admitted": admitted,
+        "swept": swept,
     }
 
 
@@ -316,6 +318,25 @@ def admit(conn: Connection, n: int) -> int:
     return admitted
 
 
+def sweep_provisional_slop(conn: Connection) -> dict:
+    """Run the behavioral AI-slop gate over admitted (provisional) artists that
+    have embedded but were never scored. The publish/MB freezer only scores at
+    ITS choke points, so the discovery cohort fell through the gap (live: 0/225
+    provisional had ever been scored). Reuses slop_detect.gate_unevaluated
+    (idempotent — skips already-scored, re-scores grown catalogs; files ai_slop
+    for farm shapes). Catalog forensics only — no GPU. Returns {evaluated, flagged}."""
+    from pipeline.slop_detect import gate_unevaluated
+
+    ids = [r[0] for r in conn.execute(
+        """
+        SELECT a.id FROM artist a
+        JOIN bc_candidate bc ON bc.artist_id = a.id
+        WHERE bc.status = 'admitted' AND a.embedding_source IS NOT NULL
+        """
+    ).fetchall()]
+    return gate_unevaluated(conn, ids)
+
+
 def main() -> None:
     import argparse
     import json
@@ -347,6 +368,7 @@ def main() -> None:
             report["pruned"] = prune_candidates(conn)
             if args.admit:
                 report["admitted"] = admit(conn, args.admit)
+            report["swept"] = sweep_provisional_slop(conn)
         conn.commit()
     print(json.dumps(report, indent=2, default=str))
 

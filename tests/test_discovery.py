@@ -16,6 +16,7 @@ from pipeline.discovery import (
     discover_wave,
     prune_candidates,
     reject_reason,
+    sweep_provisional_slop,
 )
 
 MBID = "00000000-feed-4bad-9bad-000000000dc1"
@@ -198,3 +199,52 @@ def test_prune_candidates_marks_only_obvious_junk(conn):
     assert rej == {"zz-prune-label": "pre_admit_label", "zz-prune-stale": "stale", "zz-prune-future": "future_date"}
     # rejected candidates never admit
     assert admit(conn, 50) >= 0  # smoke: admit runs clean after prune
+
+
+def _provisional(conn, name, durations, titles, *, embedded=True):
+    """An admitted (provisional, mbid-NULL) bandcamp artist with a catalog —
+    the cohort sweep_provisional_slop scores."""
+    a = conn.execute(
+        "INSERT INTO artist (display_name, mbid, embedding_source) VALUES (%s, NULL, %s) RETURNING id",
+        (name, "bandcamp" if embedded else None)).fetchone()[0]
+    conn.execute(
+        "INSERT INTO bc_candidate (platform_id, band_name, band_url, status, artist_id) "
+        "VALUES (%s, %s, %s, 'admitted', %s)",
+        (f"zz-prov-{name}", name, f"https://zz-prov-{name}.bandcamp.com", a))
+    for i, (d, t) in enumerate(zip(durations, titles, strict=True)):
+        conn.execute(
+            "INSERT INTO audio_track (artist_id, platform, platform_track_id, audio_url, duration_s, "
+            "binding_tier, verification_status, binding_evidence) "
+            "VALUES (%s,'bandcamp',%s,'/x.mp3',%s,'A','verified',%s)",
+            (a, f"zz-prov-{name}-{i}", d, json.dumps({"title": t})))
+    return a
+
+
+def test_sweep_provisional_slop_scores_and_freezes(conn):
+    # farm shape: uniform durations + numbered titles + no mbid (proven >=0.6)
+    farm = _provisional(
+        conn, "farmco",
+        [180, 181, 179, 180, 182, 180, 178, 181, 180, 179, 180, 181],
+        [f"Chill Lofi Beats Vol. {i}" for i in range(1, 13)])
+    # organic catalog (proven < 0.4)
+    org = _provisional(
+        conn, "realact",
+        [142, 367, 95, 204, 251, 178, 489, 132, 305, 88],
+        ["Winter Letters", "The Yard", "Coda", "Sleeper Hold", "Margaret",
+         "Vapor Trails", "Knife Hits", "Dust Settles Pt. 2", "Hollow", "June"])
+    # admitted but NOT embedded yet → must be skipped by the sweep
+    pend = _provisional(conn, "notyet", [180] * 12, [f"X {i}" for i in range(12)], embedded=False)
+
+    out = sweep_provisional_slop(conn)
+    assert out == {"evaluated": 2, "flagged": 1}  # farm + org scored; notyet skipped
+
+    def flagged(a):
+        return conn.execute(
+            "SELECT 1 FROM review_item WHERE reason='ai_slop' AND subject_id=%s", (a,)).fetchone() is not None
+
+    assert flagged(farm) and not flagged(org) and not flagged(pend)
+    # a slop_evaluation row was recorded for both embedded artists (gap closed)
+    assert conn.execute(
+        "SELECT count(*) FROM slop_evaluation WHERE artist_id IN (%s,%s)", (farm, org)).fetchone()[0] == 2
+    # idempotent: nothing new on a second pass
+    assert sweep_provisional_slop(conn) == {"evaluated": 0, "flagged": 0}
