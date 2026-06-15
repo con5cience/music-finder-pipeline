@@ -88,20 +88,14 @@ async def front_run_artists(artist_ids: list[str]) -> int:
     from temporalio.client import Client
 
     from pipeline.config import Settings
-    from pipeline.seed_ingest import workflow_id
-    from pipeline.workflows import IngestArtistInput, IngestArtistWorkflow
+    from pipeline.seed_ingest import start_ingest_workflow
 
     s = Settings()
     client = await Client.connect(s.temporal_address, namespace=s.temporal_namespace)
     started = 0
     for aid in artist_ids:
-        try:
-            await client.start_workflow(
-                IngestArtistWorkflow.run, IngestArtistInput(aid),
-                id=workflow_id(aid), task_queue=s.temporal_task_queue)
+        if await start_ingest_workflow(client, aid, s):
             started += 1
-        except Exception:  # noqa: BLE001 — already running is fine
-            pass
     return started
 
 

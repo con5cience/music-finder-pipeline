@@ -91,8 +91,7 @@ async def run(total: int, batch: int, low_water: int) -> None:
     from temporalio.client import Client
 
     from pipeline.config import Settings
-    from pipeline.seed_ingest import workflow_id
-    from pipeline.workflows import IngestArtistInput, IngestArtistWorkflow
+    from pipeline.seed_ingest import start_ingest_workflow
 
     settings = Settings()
     client = await Client.connect(settings.temporal_address, namespace=settings.temporal_namespace)
@@ -115,14 +114,8 @@ async def run(total: int, batch: int, low_water: int) -> None:
             return
         started = 0
         for artist_id in rows:
-            try:
-                await client.start_workflow(
-                    IngestArtistWorkflow.run, IngestArtistInput(str(artist_id)),
-                    id=workflow_id(str(artist_id)), task_queue=settings.temporal_task_queue,
-                )
+            if await start_ingest_workflow(client, artist_id, settings):
                 started += 1
-            except Exception:  # noqa: BLE001 — already-started is fine, skip
-                pass
         seeded += started
         print(f"{time.strftime('%H:%M:%S')} wave: +{started} (total {seeded}/{total}, running≈{running})", flush=True)
         await asyncio.sleep(10)

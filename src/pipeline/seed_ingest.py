@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from datetime import timedelta
 
 import psycopg
 from temporalio.client import Client
@@ -23,6 +24,37 @@ from pipeline.workflows import IngestArtistInput, IngestArtistWorkflow
 
 def workflow_id(artist_id: str) -> str:
     return f"ingest-artist-{artist_id}"
+
+
+# Cap a single ingest run's wall-clock so a workflow wedged on a stuck activity
+# (or parked indefinitely behind the 0.1/s youtube queue) self-expires into a
+# terminal state instead of (a) holding a window slot forever so the seeder's
+# low-water gate never drains, and (b) pinning its history past the 24h
+# retention. 12h is generous vs the real worst case — even a full youtube-only
+# window behind the 0.1/s cap clears in ~3-4h — and well under the 24h retention
+# so terminal runs still self-purge. Kills the 4-day zombie runs seen 2026-06-15.
+INGEST_EXECUTION_TIMEOUT = timedelta(hours=12)
+
+
+async def start_ingest_workflow(client, artist_id: str, settings) -> bool:
+    """Start IngestArtistWorkflow idempotently. Returns True if newly started,
+    False if a run with this (deterministic) id already exists.
+
+    The single place that owns how an ingest run is launched — especially
+    execution_timeout — for every producer (mass seeder, calibration seed,
+    homonym front-run), so the timeout can't drift across call sites.
+    """
+    try:
+        await client.start_workflow(
+            IngestArtistWorkflow.run,
+            IngestArtistInput(str(artist_id)),
+            id=workflow_id(str(artist_id)),
+            task_queue=settings.temporal_task_queue,
+            execution_timeout=INGEST_EXECUTION_TIMEOUT,
+        )
+        return True
+    except TemporalError:  # already-started → idempotent skip
+        return False
 
 
 def pending_artists(conn, platform: str | None, limit: int) -> list[str]:
@@ -57,15 +89,9 @@ async def seed(platform: str | None, limit: int) -> tuple[int, int]:
     with psycopg.connect(settings.database_url) as conn:
         artist_ids = pending_artists(conn, platform, limit)
     for artist_id in artist_ids:
-        try:
-            await client.start_workflow(
-                IngestArtistWorkflow.run,
-                IngestArtistInput(artist_id),
-                id=workflow_id(artist_id),
-                task_queue=settings.temporal_task_queue,
-            )
+        if await start_ingest_workflow(client, artist_id, settings):
             started += 1
-        except TemporalError:  # already-started → idempotent skip
+        else:
             skipped += 1
     return started, skipped
 
