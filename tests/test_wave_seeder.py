@@ -11,7 +11,7 @@ select_seed_batch seeds yt-only artists ONLY when no fast-lane work remains
 
 from __future__ import annotations
 
-from pipeline.wave_seeder import select_seed_batch
+from pipeline.wave_seeder import MAX_BATCH, MAX_LOW_WATER, clamp_window, select_seed_batch
 
 
 def _artist(conn, name: str, mbid_tail: str, platforms: list[str]) -> str:
@@ -68,6 +68,21 @@ def test_embedded_artists_drop_out(conn):
     conn.execute("UPDATE artist SET embedding_source = 'deezer' WHERE id = %s", (done,))
     batch = select_seed_batch(conn, 10)
     assert done not in batch
+
+
+def test_clamp_window_caps_oversized_args():
+    # the 2026-06-15 footgun: low-water 2000 / batch 1000 melted dev Temporal
+    assert clamp_window(2000, 1000) == (MAX_LOW_WATER, MAX_BATCH)
+
+
+def test_clamp_window_passes_safe_args_through():
+    assert clamp_window(200, 500) == (200, 500)
+    assert clamp_window(MAX_LOW_WATER, MAX_BATCH) == (MAX_LOW_WATER, MAX_BATCH)
+
+
+def test_clamp_window_caps_each_dimension_independently():
+    assert clamp_window(2000, 100) == (MAX_LOW_WATER, 100)
+    assert clamp_window(100, 2000) == (100, MAX_BATCH)
 
 
 def test_provisional_discovery_artists_sort_first(conn):

@@ -21,6 +21,27 @@ import time
 # a yt-only artist occupies a window slot for HOURS while these need minutes.
 _FAST_PLATFORMS = ("deezer", "bandcamp", "soundcloud")
 
+# Hard ceiling on the seeded window. The window is the ONE knob that can melt
+# the un-scale-hardened dev Temporal: low-water 2000 / batch 1000 (a one-line
+# compose edit) kept ~2000 workflows in flight and flatlined embeds for 6.5h on
+# 2026-06-15. The ceiling lives in code so an arg can't undo the lesson.
+MAX_LOW_WATER = 500
+MAX_BATCH = 500
+
+
+def clamp_window(low_water: int, batch: int) -> tuple[int, int]:
+    """Clamp the window args to the safe ceiling, warning loudly if they were
+    over-sized. Returns (low_water, batch)."""
+    cl, cb = min(low_water, MAX_LOW_WATER), min(batch, MAX_BATCH)
+    if cl != low_water or cb != batch:
+        print(
+            f"WARNING: window clamped to low_water={cl} batch={cb} "
+            f"(requested {low_water}/{batch}; ceiling {MAX_LOW_WATER}/{MAX_BATCH} — "
+            "larger windows melt the dev Temporal, see 2026-06-15)",
+            flush=True,
+        )
+    return cl, cb
+
 
 def select_seed_batch(conn, limit: int) -> list[str]:
     """Next artists to seed: fast lanes first, yt-only as last resort.
@@ -116,7 +137,8 @@ def main() -> None:
     ap.add_argument("--batch", type=int, default=500)
     ap.add_argument("--low-water", type=int, default=200)
     args = ap.parse_args()
-    asyncio.run(run(args.total, args.batch, args.low_water))
+    low_water, batch = clamp_window(args.low_water, args.batch)
+    asyncio.run(run(args.total, batch, low_water))
 
 
 if __name__ == "__main__":
