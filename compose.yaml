@@ -31,25 +31,72 @@ services:
       factory:
         aliases:
           - pipeline-db
+    deploy:
+      resources:
+        limits:
+          memory: 12g   # cap runaway; corpus DB, generous headroom on a 30g host
+        reservations:
+          memory: 2g
 
-  # --- production-maturation services (2026-06-10) -----------------------
-  # Temporal server persisted in the factory Postgres (its own database),
-  # replacing `temporal server start-dev` (SQLite, user-owned process).
+  # --- production-maturation services (2026-06-10; DB isolated 2026-06-15) --
+  # Temporal's OWN Postgres, isolated from factory-db. On 2026-06-15 a mis-set
+  # seeder window (~2000 concurrent workflows) exhausted Temporal's shared
+  # connection pool ("database connection lost: driver: bad connection") and
+  # contended with the embed workers on the same factory-db — amplifying a
+  # workflow flood into a 6.5h embed stall. A dedicated server means a flood
+  # can only hurt Temporal, never the corpus DB. No host port: reached only by
+  # the temporal container over the compose network.
+  temporal-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    command: ["postgres", "-c", "max_connections=200"]
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal  # initdb creates the temporal DB directly; auto-setup
+      # SKIPS creating it (its postgres path skips create when DBNAME==POSTGRES_USER,
+      # assuming the user's default DB is it) and only adds temporal_visibility + schema.
+    volumes:
+      - temporal-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+
   temporal:
     image: temporalio/auto-setup:1.25
     restart: unless-stopped
     environment:
       DB: postgres12
       DB_PORT: "5432"
-      POSTGRES_USER: pipeline
-      POSTGRES_PWD: pipeline
-      POSTGRES_SEEDS: factory-db
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
+      POSTGRES_SEEDS: temporal-db
       DBNAME: temporal
       VISIBILITY_DBNAME: temporal_visibility
+      # 512 history shards: auto-setup's default is 4 — the structural funnel
+      # behind the 2026-06-15 melt. Shard count is immutable except on a fresh
+      # DB, so it is set at this one-time isolation cutover. Pools raised from
+      # 20/10 (the pair that exhausted under the flood). Retention pinned at
+      # Temporal's 1-day floor; closed-workflow history self-purges at 24h.
+      NUM_HISTORY_SHARDS: "512"
+      SQL_MAX_CONNS: "50"
+      SQL_VIS_MAX_CONNS: "25"
+      DEFAULT_NAMESPACE_RETENTION: "24h"
     ports:
       - "127.0.0.1:7233:7233"
     depends_on:
-      - factory-db
+      temporal-db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 3g
 
   temporal-ui:
     image: temporalio/ui:2.31.2
@@ -195,6 +242,7 @@ networks:
 
 volumes:
   pgdata:
+  temporal-pgdata:
   fetch-cache:
   clip-stage:
   hf-cache:
