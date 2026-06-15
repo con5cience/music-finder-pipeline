@@ -247,3 +247,32 @@ def test_incremental_prunes_rows_whose_embedding_was_reset(conn):
     publish_incremental(conn, conn)
     assert conn.execute("SELECT count(*) FROM artists WHERE name='Reset Case'").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM artists WHERE name='Foreign Row'").fetchone()[0] == 1
+
+
+def test_prune_matches_provisional_by_id_when_mbid_null(conn):
+    """A provisional (mbid-NULL, ADR-019) artist's serving row is keyed by the
+    factory id, so the prune must catch it via the id branch — the OR-free
+    rewrite splits id-match from mbid-match, and a mbid-NULL row can only match
+    by id."""
+    from pipeline.publish import publish_incremental
+
+    _serving_schema(conn)
+    a = conn.execute(
+        "INSERT INTO artist (display_name, mbid, embedding_source) VALUES "
+        "('Provisional Reset', NULL, 'bandcamp') RETURNING id").fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
+        "VALUES (%s, 'mock-model', 2, '[1,0]', 3, 1.0)", (a,))
+    conn.execute(
+        "INSERT INTO artists (id, mbid, name, slug) VALUES (%s, NULL, 'Provisional Reset', 'provisional-reset')",
+        (a,))
+    conn.execute("UPDATE publish_watermark SET last_run = now() WHERE id = 'default'")
+
+    publish_incremental(conn, conn)
+    assert conn.execute("SELECT count(*) FROM artists WHERE name='Provisional Reset'").fetchone()[0] == 1
+
+    # embedding reset → pruned via the id branch (mbid is NULL, so mbid branch can't match)
+    conn.execute("DELETE FROM artist_embedding WHERE artist_id = %s", (a,))
+    conn.execute("UPDATE artist SET embedding_source = NULL WHERE id = %s", (a,))
+    publish_incremental(conn, conn)
+    assert conn.execute("SELECT count(*) FROM artists WHERE name='Provisional Reset'").fetchone()[0] == 0

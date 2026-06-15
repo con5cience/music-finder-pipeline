@@ -162,15 +162,28 @@ def prune_lost_embeddings(factory: Connection, app: Connection, batch: int = 100
             break
         ids = [r[0] for r in rows]
         mbids = [r[1] for r in rows]
+        # Index-friendly anti-join. The old single query joined on
+        # (a.mbid = x.mbid::uuid OR a.id::text = x.app_id): the OR across two
+        # columns plus the a.id::text cast defeated every index and seq-scanned
+        # the whole artist table per batch — ~30 min at 100k+ published, which
+        # held the publish transaction's watermark lock long enough that hourly
+        # runs overlapped and never committed (the 2026-06-15 sync wedge). Split
+        # into two index-driven branches (artist_pkey on id, idx_artist_mbid on
+        # mbid) UNIONed by app_id — identical semantics, no seq scan.
         victims = [r[0] for r in factory.execute(
             """
-            SELECT x.app_id
-            FROM unnest(%s::text[], %s::text[]) AS x(app_id, mbid)
-            JOIN artist a ON (x.mbid IS NOT NULL AND a.mbid = x.mbid::uuid)
-                          OR a.id::text = x.app_id
+            SELECT x.app_id::text
+            FROM unnest(%(ids)s::uuid[]) AS x(app_id)
+            JOIN artist a ON a.id = x.app_id
             WHERE NOT EXISTS (SELECT 1 FROM artist_embedding e WHERE e.artist_id = a.id)
+            UNION
+            SELECT x.app_id::text
+            FROM unnest(%(ids)s::uuid[], %(mbids)s::uuid[]) AS x(app_id, mbid)
+            JOIN artist a ON a.mbid = x.mbid
+            WHERE x.mbid IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM artist_embedding e WHERE e.artist_id = a.id)
             """,
-            (ids, mbids),
+            {"ids": ids, "mbids": mbids},
         ).fetchall()]
         if victims:
             pruned += app.execute(
