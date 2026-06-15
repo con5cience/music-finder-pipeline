@@ -36,3 +36,14 @@ def test_doctor_stands_down_while_lock_exists():
 
 def test_lock_is_gitignored():
     assert LOCK in (ROOT / ".gitignore").read_text()
+
+
+def test_doctor_branches_flood_vs_wedge():
+    # 2026-06-15: a Temporal flood (not a wedged worker) stalled embeds, and the
+    # recreate-only doctor flapped uselessly. The remedy must branch on the
+    # running-workflow count.
+    src = (ROOT / "scripts" / "factory-doctor.sh").read_text()
+    assert "workflow count" in src        # detects the flood by counting runs
+    assert "FLOOD" in src                  # threshold defined
+    assert "stop seeder" in src           # flood remedy: halt the source
+    assert "force-recreate worker-gpu worker-io" in src  # wedge remedy: recreate

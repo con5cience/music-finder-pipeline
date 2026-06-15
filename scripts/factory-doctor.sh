@@ -7,6 +7,11 @@ apk add --no-cache postgresql-client > /dev/null 2>&1  # docker:cli is alpine
 export COMPOSE_PROJECT_NAME=music-finder-pipeline  # review finding: /workspace
 # would otherwise become a PARALLEL project (fresh volumes, port conflicts)
 ZEROES=0
+# Running-ingest-workflow count above which a zero-embed stall is a Temporal
+# FLOOD (recreating workers can't fix it — the flood lives in Temporal), not a
+# wedged reader. Comfortably above the seeder's clamped legit max (~1000:
+# low-water 500 + batch 500 overshoot). See 2026-06-15.
+FLOOD=1500
 sleep 120  # let the fleet boot before judging it
 while true; do
   if [ -f /workspace/.maintenance-window ]; then
@@ -24,8 +29,21 @@ while true; do
     ZEROES=$((ZEROES+1))
     echo "$(date -u +%H:%M) doctor: zero embeds (strike $ZEROES/2)"
     if [ "$ZEROES" -ge 2 ]; then
-      echo "$(date -u +%H:%M) doctor: AUTO-REMEDIATION — recreating workers"
-      docker compose -f /workspace/compose.yaml up -d --force-recreate worker-gpu worker-io
+      # Branch the remedy on WHY embeds stalled. A FLOOD (too many workflows in
+      # flight) overwhelms Temporal; recreating workers just re-polls the flood
+      # (it flapped 5+ times to no effect on 2026-06-15). A WEDGED reader (few
+      # workflows, stuck worker) is the class the recreate actually fixes.
+      RUNNING=$(docker compose -f /workspace/compose.yaml exec -T temporal \
+        temporal workflow count --address temporal:7233 \
+        -q "ExecutionStatus='Running' AND WorkflowType='IngestArtistWorkflow'" 2>/dev/null \
+        | grep -oE '[0-9]+' | head -1)
+      if [ -n "$RUNNING" ] && [ "$RUNNING" -ge "$FLOOD" ]; then
+        echo "$(date -u +%H:%M) doctor: FLOOD ($RUNNING running >= $FLOOD) — stopping seeder (recreating workers won't help; the flood lives in Temporal)"
+        docker compose -f /workspace/compose.yaml stop seeder
+      else
+        echo "$(date -u +%H:%M) doctor: wedged-reader (running=${RUNNING:-unknown}) — recreating workers"
+        docker compose -f /workspace/compose.yaml up -d --force-recreate worker-gpu worker-io
+      fi
       ZEROES=0
     fi
   else
