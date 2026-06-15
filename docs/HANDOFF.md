@@ -22,12 +22,13 @@ infrastructure for the underground."
 
 | Service | Job |
 |---|---|
-| factory-db / temporal / temporal-ui | State + workflow engine |
+| factory-db | Corpus state (artists, embeddings) |
+| temporal-db / temporal / temporal-ui | Workflow engine on its OWN Postgres, isolated from the corpus DB (2026-06-15); 512 history shards, 24h retention |
 | worker-io | Scans, prep (staging), pipeline activities, hourly stage GC |
 | worker-gpu | Pure inference (conc 2 — the proven ceiling; do not raise casually) |
-| seeder | Refills the workflow window from the ledgers; exits 0 when corpus done |
+| seeder | Refills the workflow window from the ledgers (window clamped ≤500 in code); exits 0 when corpus done |
 | publish-sync | HOURLY incremental publish (watermark; app-then-factory commit law) |
-| factory-doctor | WRITTEN, NOT DEPLOYED — needs the operator's docker-socket OK: `docker compose up -d factory-doctor`. Until then, stall recovery is manual (red beacon on the Fleet card → `docker compose up -d --force-recreate worker-gpu worker-io`) |
+| factory-doctor | DEPLOYED stall watchdog. On a 2-strike zero-embed stall it branches: FLOOD (≥1500 running ingest workflows) → `stop seeder` (the flood lives in Temporal, not the workers); else wedged-reader → `up -d --force-recreate worker-gpu worker-io`. A flood-stopped seeder needs a manual restart |
 
 ## The queues and gates as of handoff
 
