@@ -127,7 +127,11 @@ services:
     entrypoint: [".venv/bin/python", "-m", "pipeline.wave_seeder"]
     # 500k > the 492,786 post-yt-gate denominator: the real stop is the
     # corpus-exhausted check, not this bound (451k would have stopped short).
-    command: ["--total", "500000", "--batch", "1000", "--low-water", "2000"]
+    # low-water 2000/batch 1000 melted the dev Temporal (2026-06-15: ~2000
+    # concurrent workflows → embeds flatlined 6.5h, recreate-resistant). Back to
+    # the documented small/constant window — the dev Temporal history is the
+    # un-scale-hardened component (see wave_seeder docstring).
+    command: ["--total", "500000", "--batch", "500", "--low-water", "200"]
     environment:
       PIPELINE_DATABASE_URL: postgresql://pipeline:pipeline@factory-db:5432/pipeline
       PIPELINE_TEMPORAL_ADDRESS: temporal:7233
