@@ -232,6 +232,79 @@ def test_artist_tags_idf_and_gate_suppress_a_magnet(conn):
     assert "magnet-tag" not in tags  # demoted by idf, then gated out by P3
 
 
+def test_artist_tags_batch_matches_per_artist(conn):
+    """The set-based fast path must be byte-identical to the per-artist function
+    across all three cases: primary (z/idf/gate kept), all-gated (-> {}), and the
+    no-scores fallback (track aggregation)."""
+    from pipeline.publish import artist_tags, artist_tags_batch
+
+    # df: magnet on 2 fillers (so it's over-assigned), rare on 1
+    fillers = [
+        conn.execute("INSERT INTO artist (display_name) VALUES (%s) RETURNING id", (f"eqf{i}",)).fetchone()[0]
+        for i in range(2)
+    ]
+    conn.execute(
+        "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES "
+        "(%s,'magnet-tag',0.5,'muq-mulan-large'),(%s,'magnet-tag',0.5,'muq-mulan-large')",
+        (fillers[0], fillers[1]),
+    )
+    # A: magnet (gated) + rare (kept)
+    A = conn.execute("INSERT INTO artist (display_name) VALUES ('eqA') RETURNING id").fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES "
+        "(%s,'magnet-tag',0.70,'muq-mulan-large'),(%s,'rare-tag',0.70,'muq-mulan-large')", (A, A),
+    )
+    # B: a single BELOW-mean tag → z<0 → z_adj<0 → dropped → {}
+    B = conn.execute("INSERT INTO artist (display_name) VALUES ('eqB') RETURNING id").fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES "
+        "(%s,'magnet-tag',0.30,'muq-mulan-large')", (B,),
+    )
+    # C: NO artist_tag_scores → must hit the per-artist track-aggregation fallback
+    C = conn.execute("INSERT INTO artist (display_name) VALUES ('eqC') RETURNING id").fetchone()[0]
+    tc = conn.execute(
+        "INSERT INTO audio_track (artist_id, platform, platform_track_id, binding_tier, verification_status) "
+        "VALUES (%s,'deezer','eq-c-t1','A','verified') RETURNING id", (C,),
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO track_tag_scores (track_id, tag, score, model) VALUES (%s,'fallback-tag',0.8,'muq-mulan-large')",
+        (tc,),
+    )
+    # a low filler track score so the corpus track-mean sits below C's tag —
+    # otherwise a lone track_tag_score equals the mean (z=0) and gets gated.
+    tf = conn.execute(
+        "INSERT INTO audio_track (artist_id, platform, platform_track_id, binding_tier, verification_status) "
+        "VALUES (%s,'deezer','eq-f-t1','A','verified') RETURNING id", (fillers[0],),
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO track_tag_scores (track_id, tag, score, model) VALUES (%s,'low-tag',0.1,'muq-mulan-large')",
+        (tf,),
+    )
+    conn.execute(
+        "INSERT INTO tag_calibration (tag, model, mean, stddev, n) VALUES "
+        "('magnet-tag','muq-mulan-large#artist',0.45,0.10,3),"
+        "('rare-tag','muq-mulan-large#artist',0.45,0.10,1)"
+    )
+    g = conn.execute(
+        "SELECT avg(score), greatest(stddev(score),1e-6), count(DISTINCT artist_id) FROM artist_tag_scores"
+    ).fetchone()
+
+    batch = artist_tags_batch(conn, [A, B, C], g)
+    for aid in (A, B, C):
+        assert batch.get(str(aid), {}) == artist_tags(conn, aid, g_moments=g), f"batch != per-artist for {aid}"
+    # and the substance held: A keeps rare not magnet, B empty, C fell back
+    assert "rare-tag" in batch[str(A)] and "magnet-tag" not in batch[str(A)]
+    assert batch.get(str(B), {}) == {}
+    assert "fallback-tag" in batch[str(C)]
+
+
+def test_artist_urls_batch_matches_per_artist(conn):
+    from pipeline.publish import artist_urls, artist_urls_batch
+    a = _factory_artist(conn)  # has bandcamp + deezer platform_identity
+    assert artist_urls_batch(conn, [a]).get(str(a), {}) == artist_urls(conn, a)
+    assert artist_urls(conn, a)  # non-empty, so this actually proves equivalence
+
+
 def test_refresh_calibration_writes_both_track_and_artist_moments(conn):
     """ADR-020 P1: refresh writes track-source moments (bare model) AND
     artist-source moments (model+'#artist') from their respective tables,

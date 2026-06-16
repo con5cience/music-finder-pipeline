@@ -375,6 +375,123 @@ def artist_tags(conn: Connection, artist_id, g_moments=None) -> dict[str, int]:
     return {tag: max(1, round(float(z)) + 1) for tag, z, _r in rows}
 
 
+# --- batch (set-based) reads: one query per batch instead of per artist. The
+# per-artist helpers above stay (single-artist callers + the rare tag fallback);
+# publish_rows uses these so a full re-publish is ~one query each, not 5*N. All
+# key on artist_id::text so lookups match regardless of psycopg uuid adaptation.
+
+
+def artist_urls_batch(conn: Connection, aids: list) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for aid, platform, pid in conn.execute(
+        "SELECT artist_id::text, platform, platform_id FROM platform_identity "
+        "WHERE artist_id = ANY(%s::uuid[])",
+        ([str(a) for a in aids],),
+    ).fetchall():
+        builder = _URL_BUILDERS.get(platform)
+        if builder:
+            out.setdefault(aid, {})[_URL_COLUMNS[platform]] = builder(pid)
+    return out
+
+
+def artist_perceptual_batch(conn: Connection, aids: list) -> dict[str, dict]:
+    keys = ("danceability", "valence", "arousal", "speechiness", "liveness", "vocalness")
+    out: dict[str, dict] = {}
+    for row in conn.execute(
+        """
+        SELECT t.artist_id::text, avg(danceability), avg(valence), avg(arousal),
+               avg(speechiness), avg(liveness), avg(vocalness)
+        FROM track_perceptual tp JOIN audio_track t ON t.id = tp.track_id
+        WHERE t.artist_id = ANY(%s::uuid[]) GROUP BY t.artist_id
+        """,
+        ([str(a) for a in aids],),
+    ).fetchall():
+        if row[1] is not None:
+            out[row[0]] = {k: round(float(v), 4) for k, v in zip(keys, row[1:], strict=True)}
+    return out
+
+
+def artist_language_batch(conn: Connection, aids: list) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for aid, lang, _cnt in conn.execute(
+        """
+        SELECT aid, language, cnt FROM (
+            SELECT t.artist_id::text AS aid, tl.language, count(*) AS cnt,
+                   row_number() OVER (PARTITION BY t.artist_id ORDER BY count(*) DESC) AS rn
+            FROM track_language tl JOIN audio_track t ON t.id = tl.track_id
+            WHERE t.artist_id = ANY(%s::uuid[]) AND tl.confidence >= 0.6
+            GROUP BY t.artist_id, tl.language
+        ) s WHERE rn = 1 AND cnt >= 2
+        """,
+        ([str(a) for a in aids],),
+    ).fetchall():
+        out[aid] = lang
+    return out
+
+
+def artist_location_batch(conn: Connection, aids: list) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for aid, loc in conn.execute(
+        "SELECT DISTINCT ON (artist_id) artist_id::text, location FROM bc_candidate "
+        "WHERE artist_id = ANY(%s::uuid[]) AND location IS NOT NULL ORDER BY artist_id",
+        ([str(a) for a in aids],),
+    ).fetchall():
+        out[aid] = loc
+    return out
+
+
+def artist_tags_batch(conn: Connection, aids: list, g_moments) -> dict[str, dict]:
+    """Batched twin of artist_tags' PRIMARY path (ADR-020 P1-P3: artist-moment
+    z, idf demote, top-K, relative gate) for the whole batch in one query. The
+    rare fallback (an artist with no non-NaN artist_tag_scores) reuses the
+    per-artist artist_tags so the track-aggregation path stays identical."""
+    gmean, gsd = (g_moments[0] or 0.0), (g_moments[1] or 1e-6)
+    n_corpus = float(g_moments[2] or 1)
+    ids = [str(a) for a in aids]
+    out: dict[str, dict] = {}
+    for aid, tag, z in conn.execute(
+        """
+        WITH s AS (
+            SELECT ats.artist_id::text AS aid, ats.tag,
+                   (ats.score - coalesce(tc.mean, %(gm)s)) / coalesce(tc.stddev, %(gs)s) AS z,
+                   ln(%(n)s / greatest(coalesce(tc.n, 1), 1)::float) AS idf,
+                   coalesce(tc.n, 0)::float / %(n)s AS rate
+            FROM artist_tag_scores ats
+            LEFT JOIN tag_calibration tc ON tc.tag = ats.tag AND tc.model = ats.model || %(suf)s
+            WHERE ats.artist_id = ANY(%(aids)s::uuid[]) AND ats.score != 'NaN'::real
+        ),
+        r AS (SELECT aid, tag, z, z * idf AS z_adj FROM s WHERE rate < %(ceil)s),
+        ranked AS (
+            SELECT aid, tag, z, z_adj,
+                   row_number() OVER (PARTITION BY aid ORDER BY z_adj DESC) AS rn,
+                   max(z_adj) OVER (PARTITION BY aid) AS top_za
+            FROM r
+        )
+        SELECT aid, tag, z FROM ranked
+        WHERE rn <= %(k)s AND z_adj > 0 AND z_adj >= %(gate)s * top_za
+        """,
+        {"gm": gmean, "gs": gsd, "n": n_corpus, "suf": ARTIST_SUFFIX, "aids": ids,
+         "ceil": MAGNET_RATE_CEILING, "k": TAG_K, "gate": TAG_REL_GATE},
+    ).fetchall():
+        out.setdefault(aid, {})[tag] = max(1, round(float(z)) + 1)
+    # fallback only for artists with NO non-NaN artist_tag_scores (matches the
+    # per-artist code: primary empty -> track aggregation). Rare (~0.15%).
+    covered = {
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT artist_id::text FROM artist_tag_scores "
+            "WHERE artist_id = ANY(%s::uuid[]) AND score != 'NaN'::real",
+            (ids,),
+        ).fetchall()
+    }
+    for a in aids:
+        sa = str(a)
+        if sa not in covered:
+            t = artist_tags(conn, a, g_moments=g_moments)
+            if t:
+                out[sa] = t
+    return out
+
+
 def publish_artists(factory: Connection, app: Connection, limit: int = 1000, since=None) -> int:
     """Upsert embedded artists into the serving DB. Returns artists published."""
     return publish_rows(factory, app, publishable_artists(factory, limit, since))
@@ -383,18 +500,28 @@ def publish_artists(factory: Connection, app: Connection, limit: int = 1000, sin
 def publish_rows(factory: Connection, app: Connection, rows: list[tuple]) -> int:
     import json
 
+    if not rows:
+        return 0
     # global tag moments ONCE per batch (review finding: the per-artist CTE
     # full-scanned artist_tag_scores for EVERY artist — infeasible at 451k)
     g_artist = factory.execute(
         "SELECT avg(score), greatest(stddev(score), 1e-6), count(DISTINCT artist_id) FROM artist_tag_scores"
     ).fetchone()
+    # set-based reads: one query each for the whole batch, not 5 per artist.
+    aids = [r[0] for r in rows]
+    urls_by = artist_urls_batch(factory, aids)
+    tags_by = artist_tags_batch(factory, aids, g_artist)
+    perc_by = artist_perceptual_batch(factory, aids)
+    lang_by = artist_language_batch(factory, aids)
+    loc_by = artist_location_batch(factory, aids)
     published = 0
     for aid, mbid, name, source, embedding, _model, ratio in rows:
-        urls = artist_urls(factory, aid)
-        tags = artist_tags(factory, aid, g_moments=g_artist)
-        perceptual = artist_perceptual(factory, aid)
-        language = artist_language(factory, aid)
-        location = artist_location(factory, aid)
+        akey = str(aid)
+        urls = urls_by.get(akey, {})
+        tags = tags_by.get(akey, {})
+        perceptual = perc_by.get(akey)
+        language = lang_by.get(akey)
+        location = loc_by.get(akey)
         url_cols = "".join(f", {c} = %s" for c in urls)
         # Identity key (ADR-019): mbid when MB knows them; otherwise the
         # FACTORY artist id IS the app row id — provisional identity that an
