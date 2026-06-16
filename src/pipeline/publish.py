@@ -23,6 +23,12 @@ from psycopg import Connection
 from pipeline.tag_calibration import ARTIST_SUFFIX
 
 TAG_K = 10
+# ADR-020 P2: hard-drop a tag assigned to more than this share of the corpus.
+# Default 1.0 = OFF, because a pure rate ceiling can't separate spurious magnets
+# (kilapanga 0.22) from legitimately-broad genres (rock 0.16, edm 0.17) — they
+# overlap — so we rely on the soft idf (ln(N/df)) ranking instead. Lower this
+# only to force-drop a specific pathological tag.
+MAGNET_RATE_CEILING = 1.0
 
 _URL_BUILDERS = {
     "deezer": lambda pid: f"https://www.deezer.com/artist/{pid}",
@@ -258,24 +264,40 @@ def artist_tags(conn: Connection, artist_id, g_moments=None) -> dict[str, int]:
     (coverage-weighted, known-noisy on preview sources)."""
     if g_moments is None:
         g_moments = conn.execute(
-            "SELECT avg(score), greatest(stddev(score), 1e-6) FROM artist_tag_scores"
+            "SELECT avg(score), greatest(stddev(score), 1e-6), count(DISTINCT artist_id) FROM artist_tag_scores"
         ).fetchone()
     gmean, gsd = (g_moments[0] or 0.0), (g_moments[1] or 1e-6)
+    n_corpus = (
+        float(g_moments[2] or 1)
+        if len(g_moments) > 2
+        else float(conn.execute("SELECT count(DISTINCT artist_id) FROM artist_tag_scores").fetchone()[0] or 1)
+    )
     primary = conn.execute(
         """
-        SELECT ats.tag,
-               (ats.score - coalesce(tc.mean, %s)) / coalesce(tc.stddev, %s) AS z
-        FROM artist_tag_scores ats
-        -- ADR-020 P1: join the ARTIST-source moments (model||'#artist'), not the
-        -- track moments, so z-scoring matches the distribution being scored.
-        LEFT JOIN tag_calibration tc ON tc.tag = ats.tag AND tc.model = ats.model || %s
-        WHERE ats.artist_id = %s AND ats.score != 'NaN'::real  -- NaN armor (pg NaN-equality law)
-        ORDER BY z DESC LIMIT %s
+        SELECT tag, z, z * idf AS z_adj FROM (
+            SELECT ats.tag,
+                   (ats.score - coalesce(tc.mean, %s)) / coalesce(tc.stddev, %s) AS z,
+                   -- idf = ln(N/df): df is the ARTIST-source n (one row per artist
+                   -- per tag). An over-assigned magnet gets a small idf, a rare tag
+                   -- a large one, so z*idf demotes magnets while a genuinely-broad
+                   -- genre survives on its high z (ADR-020 P2).
+                   ln(%s / greatest(coalesce(tc.n, 1), 1)::float) AS idf,
+                   coalesce(tc.n, 0)::float / %s AS rate
+            FROM artist_tag_scores ats
+            -- ADR-020 P1: ARTIST-source moments (model||'#artist'), matching the
+            -- distribution being scored.
+            LEFT JOIN tag_calibration tc ON tc.tag = ats.tag AND tc.model = ats.model || %s
+            WHERE ats.artist_id = %s AND ats.score != 'NaN'::real  -- NaN armor (pg NaN-equality law)
+        ) s
+        WHERE rate < %s  -- hard ceiling (default OFF at 1.0)
+        ORDER BY z_adj DESC LIMIT %s
         """,
-        (gmean, gsd, ARTIST_SUFFIX, artist_id, TAG_K),
+        (gmean, gsd, n_corpus, n_corpus, ARTIST_SUFFIX, artist_id, MAGNET_RATE_CEILING, TAG_K),
     ).fetchall()
     if primary:
-        return {tag: max(1, round(float(z)) + 1) for tag, z in primary if float(z) > 0}
+        # Keep/order by z_adj (idf-demoted); weight from the plain z so tag_vector
+        # magnitudes stay in their normal range.
+        return {tag: max(1, round(float(z)) + 1) for tag, z, z_adj in primary if float(z_adj) > 0}
     rows = conn.execute(
         """
         WITH g AS (SELECT avg(score) gmean, greatest(stddev(score), 1e-6) gsd
@@ -312,7 +334,7 @@ def publish_rows(factory: Connection, app: Connection, rows: list[tuple]) -> int
     # global tag moments ONCE per batch (review finding: the per-artist CTE
     # full-scanned artist_tag_scores for EVERY artist — infeasible at 451k)
     g_artist = factory.execute(
-        "SELECT avg(score), greatest(stddev(score), 1e-6) FROM artist_tag_scores"
+        "SELECT avg(score), greatest(stddev(score), 1e-6), count(DISTINCT artist_id) FROM artist_tag_scores"
     ).fetchone()
     published = 0
     for aid, mbid, name, source, embedding, _model, ratio in rows:

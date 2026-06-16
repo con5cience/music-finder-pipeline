@@ -123,6 +123,13 @@ def test_artist_tags_z_score_against_artist_moments_not_track(conn):
     Same tag, LOW track mean (0.49) but HIGH artist mean (0.80): a 0.50 score is
     above the track mean (would publish under the old bug) but below the artist
     mean → must be EXCLUDED."""
+    # filler corpus so N (distinct tagged artists) > df → the P2 idf is positive
+    for i in range(2):
+        fi = conn.execute("INSERT INTO artist (display_name) VALUES (%s) RETURNING id", (f"cu-f{i}",)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES (%s,'cu-filler',0.4,'muq-mulan-large')",
+            (fi,),
+        )
     a = conn.execute(
         "INSERT INTO artist (display_name, mbid, embedding_source) "
         "VALUES ('Cal Units Fixture', %s, 'bandcamp') RETURNING id",
@@ -135,10 +142,43 @@ def test_artist_tags_z_score_against_artist_moments_not_track(conn):
     )
     conn.execute(
         "INSERT INTO tag_calibration (tag, model, mean, stddev, n) VALUES "
-        "('cal-units', 'muq-mulan-large', 0.49, 0.05, 100), "
-        "('cal-units', 'muq-mulan-large#artist', 0.80, 0.05, 100)"
+        "('cal-units', 'muq-mulan-large', 0.49, 0.05, 1), "
+        "('cal-units', 'muq-mulan-large#artist', 0.80, 0.05, 1)"
     )
-    assert "cal-units" not in artist_tags(conn, a)  # judged against the artist mean (0.80)
+    assert "cal-units" not in artist_tags(conn, a)  # judged against the artist mean (0.80) → z<0
+
+
+def test_artist_tags_idf_demotes_higher_df_tag(conn):
+    """ADR-020 P2: with EQUAL raw z, the rarer tag (higher idf = ln(N/df)) ranks
+    above the more-assigned one — idf demotes magnets by corpus frequency."""
+    f = [
+        conn.execute("INSERT INTO artist (display_name) VALUES (%s) RETURNING id", (f"idf-f{i}",)).fetchone()[0]
+        for i in range(3)
+    ]
+    conn.execute(
+        "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES "
+        "(%s,'magnet-tag',0.5,'muq-mulan-large'),(%s,'magnet-tag',0.5,'muq-mulan-large'),"
+        "(%s,'neutral-tag',0.5,'muq-mulan-large')",
+        (f[0], f[1], f[2]),
+    )
+    a = conn.execute(
+        "INSERT INTO artist (display_name, mbid, embedding_source) "
+        "VALUES ('IDF Fixture', %s, 'bandcamp') RETURNING id",
+        ("00000000-feed-4bad-9bad-0000000ca103",),
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES "
+        "(%s,'magnet-tag',0.70,'muq-mulan-large'),(%s,'rare-tag',0.70,'muq-mulan-large')",
+        (a, a),
+    )
+    # equal mean/sd → equal raw z; df differs (magnet on 3 of 4 artists, rare on 1)
+    conn.execute(
+        "INSERT INTO tag_calibration (tag, model, mean, stddev, n) VALUES "
+        "('magnet-tag','muq-mulan-large#artist',0.45,0.10,3),"
+        "('rare-tag','muq-mulan-large#artist',0.45,0.10,1)"
+    )
+    keys = list(artist_tags(conn, a).keys())
+    assert keys[:2] == ["rare-tag", "magnet-tag"]  # idf orders the rarer tag first
 
 
 def test_refresh_calibration_writes_both_track_and_artist_moments(conn):
