@@ -15,23 +15,46 @@ from psycopg import Connection
 
 MIN_N = 20  # below this, per-tag moments are noise — use the global moments
 
+# ADR-020 Phase 1: artist-mean moments are stored under model + ARTIST_SUFFIX so
+# the artist publish path z-scores against the SAME distribution it scores
+# (artist_tag_scores), not the track distribution. Track moments stay under the
+# bare model for the artist_tags FALLBACK (track-aggregated) + calibrated_tags.
+# (model, model+suffix) coexist in the (tag, model) PK — no schema change.
+ARTIST_SUFFIX = "#artist"
+
 
 def refresh_calibration(conn: Connection, model: str = "muq-mulan-large") -> int:
-    """Recompute all per-tag moments for a model. Returns tags calibrated."""
-    conn.execute("DELETE FROM tag_calibration WHERE model = %s", (model,))
+    """Recompute per-tag moments for a model. Writes TWO moment sets and returns
+    the total rows written:
+      - track-source (model):           artist_tags FALLBACK + calibrated_tags
+      - artist-source (model+SUFFIX):   artist_tags PRIMARY (the units-fix)
+    Both are derived data, replaced wholesale (DELETE+INSERT)."""
+    artist_model = model + ARTIST_SUFFIX
+    conn.execute("DELETE FROM tag_calibration WHERE model IN (%s, %s)", (model, artist_model))
     conn.execute(
         """
         INSERT INTO tag_calibration (tag, model, mean, stddev, n)
-        SELECT tag, model, avg(score), greatest(stddev(score), 1e-6), count(*)
+        SELECT tag, %s, avg(score), greatest(stddev(score), 1e-6), count(*)
         FROM track_tag_scores
         WHERE model = %s
-        GROUP BY tag, model
+        GROUP BY tag
         HAVING count(*) >= 2
         """,
-        (model,),
+        (model, model),
+    )
+    conn.execute(
+        """
+        INSERT INTO tag_calibration (tag, model, mean, stddev, n)
+        SELECT tag, %s, avg(score), greatest(stddev(score), 1e-6), count(*)
+        FROM artist_tag_scores
+        WHERE model = %s
+        GROUP BY tag
+        HAVING count(*) >= 2
+        """,
+        (artist_model, model),
     )
     return conn.execute(
-        "SELECT count(*) FROM tag_calibration WHERE model = %s", (model,)
+        "SELECT count(*) FROM tag_calibration WHERE model IN (%s, %s)", (model, artist_model)
     ).fetchone()[0]
 
 

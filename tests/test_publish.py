@@ -117,6 +117,70 @@ def test_tags_use_calibrated_positive_z_only(conn):
     assert "zz-pub-weak" not in tags  # 0.1 is far below → negative z, excluded
 
 
+def test_artist_tags_z_score_against_artist_moments_not_track(conn):
+    """ADR-020 P1 units fix: the PRIMARY (artist_tag_scores) path must z-score
+    against the ARTIST-source moments (model+'#artist'), not the track moments.
+    Same tag, LOW track mean (0.49) but HIGH artist mean (0.80): a 0.50 score is
+    above the track mean (would publish under the old bug) but below the artist
+    mean → must be EXCLUDED."""
+    a = conn.execute(
+        "INSERT INTO artist (display_name, mbid, embedding_source) "
+        "VALUES ('Cal Units Fixture', %s, 'bandcamp') RETURNING id",
+        ("00000000-feed-4bad-9bad-0000000ca101",),
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_tag_scores (artist_id, tag, score, model) "
+        "VALUES (%s, 'cal-units', 0.50, 'muq-mulan-large')",
+        (a,),
+    )
+    conn.execute(
+        "INSERT INTO tag_calibration (tag, model, mean, stddev, n) VALUES "
+        "('cal-units', 'muq-mulan-large', 0.49, 0.05, 100), "
+        "('cal-units', 'muq-mulan-large#artist', 0.80, 0.05, 100)"
+    )
+    assert "cal-units" not in artist_tags(conn, a)  # judged against the artist mean (0.80)
+
+
+def test_refresh_calibration_writes_both_track_and_artist_moments(conn):
+    """ADR-020 P1: refresh writes track-source moments (bare model) AND
+    artist-source moments (model+'#artist') from their respective tables,
+    distinct when the distributions differ."""
+    from pipeline.tag_calibration import ARTIST_SUFFIX, refresh_calibration
+
+    a1 = conn.execute("INSERT INTO artist (display_name) VALUES ('Cal A1') RETURNING id").fetchone()[0]
+    a2 = conn.execute("INSERT INTO artist (display_name) VALUES ('Cal A2') RETURNING id").fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES "
+        "(%s,'zz-cal',0.70,'muq-mulan-large'),(%s,'zz-cal',0.70,'muq-mulan-large')",
+        (a1, a2),
+    )
+    t1 = conn.execute(
+        "INSERT INTO audio_track (artist_id, platform, platform_track_id, binding_tier, verification_status) "
+        "VALUES (%s,'deezer','zz-cal-t1','A','verified') RETURNING id",
+        (a1,),
+    ).fetchone()[0]
+    t2 = conn.execute(
+        "INSERT INTO audio_track (artist_id, platform, platform_track_id, binding_tier, verification_status) "
+        "VALUES (%s,'deezer','zz-cal-t2','A','verified') RETURNING id",
+        (a1,),
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO track_tag_scores (track_id, tag, score, model) VALUES "
+        "(%s,'zz-cal',0.30,'muq-mulan-large'),(%s,'zz-cal',0.30,'muq-mulan-large')",
+        (t1, t2),
+    )
+    refresh_calibration(conn)
+    track = conn.execute(
+        "SELECT mean FROM tag_calibration WHERE tag='zz-cal' AND model='muq-mulan-large'"
+    ).fetchone()
+    artist = conn.execute(
+        "SELECT mean FROM tag_calibration WHERE tag='zz-cal' AND model=%s",
+        ("muq-mulan-large" + ARTIST_SUFFIX,),
+    ).fetchone()
+    assert track and abs(track[0] - 0.30) < 1e-3
+    assert artist and abs(artist[0] - 0.70) < 1e-3  # distinct artist-source mean — the units fix
+
+
 def test_publish_mbid_null_then_loop_close(conn):
     """ADR-019's whole identity lifecycle in one test: provisional publish
     (app row id = factory id), then the mbid attaches (sync), then

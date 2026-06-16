@@ -20,6 +20,8 @@ import unicodedata
 
 from psycopg import Connection
 
+from pipeline.tag_calibration import ARTIST_SUFFIX
+
 TAG_K = 10
 
 _URL_BUILDERS = {
@@ -264,11 +266,13 @@ def artist_tags(conn: Connection, artist_id, g_moments=None) -> dict[str, int]:
         SELECT ats.tag,
                (ats.score - coalesce(tc.mean, %s)) / coalesce(tc.stddev, %s) AS z
         FROM artist_tag_scores ats
-        LEFT JOIN tag_calibration tc ON tc.tag = ats.tag AND tc.model = ats.model
+        -- ADR-020 P1: join the ARTIST-source moments (model||'#artist'), not the
+        -- track moments, so z-scoring matches the distribution being scored.
+        LEFT JOIN tag_calibration tc ON tc.tag = ats.tag AND tc.model = ats.model || %s
         WHERE ats.artist_id = %s AND ats.score != 'NaN'::real  -- NaN armor (pg NaN-equality law)
         ORDER BY z DESC LIMIT %s
         """,
-        (gmean, gsd, artist_id, TAG_K),
+        (gmean, gsd, ARTIST_SUFFIX, artist_id, TAG_K),
     ).fetchall()
     if primary:
         return {tag: max(1, round(float(z)) + 1) for tag, z in primary if float(z) > 0}
