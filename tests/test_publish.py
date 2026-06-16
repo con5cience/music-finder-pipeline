@@ -280,6 +280,17 @@ def test_artist_tags_batch_matches_per_artist(conn):
         "INSERT INTO track_tag_scores (track_id, tag, score, model) VALUES (%s,'low-tag',0.1,'muq-mulan-large')",
         (tf,),
     )
+    # D: a SECOND no-artist_tag_scores artist → exercises the batched fallback
+    # partitioning across >1 artist (must not bleed C's tag into D).
+    D = conn.execute("INSERT INTO artist (display_name) VALUES ('eqD') RETURNING id").fetchone()[0]
+    td = conn.execute(
+        "INSERT INTO audio_track (artist_id, platform, platform_track_id, binding_tier, verification_status) "
+        "VALUES (%s,'deezer','eq-d-t1','A','verified') RETURNING id", (D,),
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO track_tag_scores (track_id, tag, score, model) VALUES (%s,'d-tag',0.7,'muq-mulan-large')",
+        (td,),
+    )
     conn.execute(
         "INSERT INTO tag_calibration (tag, model, mean, stddev, n) VALUES "
         "('magnet-tag','muq-mulan-large#artist',0.45,0.10,3),"
@@ -289,13 +300,15 @@ def test_artist_tags_batch_matches_per_artist(conn):
         "SELECT avg(score), greatest(stddev(score),1e-6), count(DISTINCT artist_id) FROM artist_tag_scores"
     ).fetchone()
 
-    batch = artist_tags_batch(conn, [A, B, C], g)
-    for aid in (A, B, C):
+    batch = artist_tags_batch(conn, [A, B, C, D], g)
+    for aid in (A, B, C, D):
         assert batch.get(str(aid), {}) == artist_tags(conn, aid, g_moments=g), f"batch != per-artist for {aid}"
-    # and the substance held: A keeps rare not magnet, B empty, C fell back
+    # and the substance held: A keeps rare not magnet, B empty, C+D fell back to
+    # their OWN track tags (no cross-artist bleed)
     assert "rare-tag" in batch[str(A)] and "magnet-tag" not in batch[str(A)]
     assert batch.get(str(B), {}) == {}
-    assert "fallback-tag" in batch[str(C)]
+    assert "fallback-tag" in batch[str(C)] and "d-tag" not in batch[str(C)]
+    assert "d-tag" in batch[str(D)] and "fallback-tag" not in batch[str(D)]
 
 
 def test_artist_urls_batch_matches_per_artist(conn):

@@ -440,6 +440,44 @@ def artist_location_batch(conn: Connection, aids: list) -> dict[str, str]:
     return out
 
 
+def artist_tags_fallback_batch(conn: Connection, aids: list) -> dict[str, dict]:
+    """Batched twin of artist_tags' FALLBACK (track-aggregation) path, for the
+    artists with no non-NaN artist_tag_scores. Per-artist this query is heavy
+    (track_tag_scores JOIN audio_track), so looping it for the NaN-poisoned old
+    artists was the real cost (a 2000-id sample: 141 fell back = ~70s). One
+    query, window-ranked top-K per artist — same global track moments, same
+    mz>0 / mz*sqrt(cnt) ranking as the per-artist code."""
+    if not aids:
+        return {}
+    out: dict[str, dict] = {}
+    for aid, tag, mz in conn.execute(
+        """
+        WITH g AS (
+            SELECT avg(score) AS gmean, greatest(stddev(score), 1e-6) AS gsd FROM track_tag_scores
+        ),
+        z AS (
+            SELECT t.artist_id::text AS aid, tts.tag,
+                   avg((tts.score - coalesce(tc.mean, g.gmean)) / coalesce(tc.stddev, g.gsd)) AS mz,
+                   count(*) AS cnt
+            FROM track_tag_scores tts
+            JOIN audio_track t ON t.id = tts.track_id
+            CROSS JOIN g
+            LEFT JOIN tag_calibration tc ON tc.tag = tts.tag AND tc.model = tts.model
+            WHERE t.artist_id = ANY(%(aids)s::uuid[]) AND tts.score != 'NaN'::real
+            GROUP BY t.artist_id, tts.tag
+        ),
+        ranked AS (
+            SELECT aid, tag, mz, row_number() OVER (PARTITION BY aid ORDER BY mz * sqrt(cnt) DESC) AS rn
+            FROM z WHERE mz > 0
+        )
+        SELECT aid, tag, mz FROM ranked WHERE rn <= %(k)s
+        """,
+        {"aids": [str(a) for a in aids], "k": TAG_K},
+    ).fetchall():
+        out.setdefault(aid, {})[tag] = max(1, round(float(mz)) + 1)
+    return out
+
+
 def artist_tags_batch(conn: Connection, aids: list, g_moments) -> dict[str, dict]:
     """Batched twin of artist_tags' PRIMARY path (ADR-020 P1-P3: artist-moment
     z, idf demote, top-K, relative gate) for the whole batch in one query. The
@@ -474,8 +512,10 @@ def artist_tags_batch(conn: Connection, aids: list, g_moments) -> dict[str, dict
          "ceil": MAGNET_RATE_CEILING, "k": TAG_K, "gate": TAG_REL_GATE},
     ).fetchall():
         out.setdefault(aid, {})[tag] = max(1, round(float(z)) + 1)
-    # fallback only for artists with NO non-NaN artist_tag_scores (matches the
-    # per-artist code: primary empty -> track aggregation). Rare (~0.15%).
+    # fallback for artists with NO non-NaN artist_tag_scores (matches the
+    # per-artist code: primary empty -> track aggregation). NaN-poisoned old
+    # artists make this non-trivial, so it is BATCHED too (looping it per artist
+    # was the whole cost).
     covered = {
         r[0] for r in conn.execute(
             "SELECT DISTINCT artist_id::text FROM artist_tag_scores "
@@ -483,12 +523,9 @@ def artist_tags_batch(conn: Connection, aids: list, g_moments) -> dict[str, dict
             (ids,),
         ).fetchall()
     }
-    for a in aids:
-        sa = str(a)
-        if sa not in covered:
-            t = artist_tags(conn, a, g_moments=g_moments)
-            if t:
-                out[sa] = t
+    uncovered = [a for a in aids if str(a) not in covered]
+    if uncovered:
+        out.update(artist_tags_fallback_batch(conn, uncovered))
     return out
 
 
