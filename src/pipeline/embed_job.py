@@ -16,6 +16,7 @@ import hashlib
 import logging
 import os
 import shutil
+import subprocess
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -173,48 +174,102 @@ def _vec_text(vector: list[float]) -> str:
     return "[" + ",".join(repr(float(x)) for x in vector) + "]"
 
 
+# ADR-021 Tier B: archive a COMPRESSED copy of the EMBEDDED window clips (Opus),
+# not the full fetched source — full sources (bandcamp/youtube fetch whole tracks)
+# projected ~6.6TB; the embedded windows at 32kbps Opus are ~0.6TB. soundfile
+# can't set the Opus bitrate (it emits ~61kbps), so we encode via ffmpeg.
+ARCHIVE_OPUS_KBPS = int(os.environ.get("PIPELINE_ARCHIVE_OPUS_KBPS", "32"))
+ARCHIVE_SR = int(os.environ.get("PIPELINE_ARCHIVE_SR", "24000"))  # SR is ~free at fixed bitrate
+ARCHIVE_MIN_FREE_BYTES = int(os.environ.get("PIPELINE_ARCHIVE_MIN_FREE_GB", "200")) * 1024**3
+_archive_capped_logged = False  # one cap-hit warning per process, not per track
+
+
 def archive_root() -> Path:
     return Path(os.environ.get("PIPELINE_ARCHIVE_DIR", "/archive"))
 
 
-def archive_source_clip(
-    conn: Connection, artist_id: str, track_id: str, platform: str, src_path: str
+def _encode_opus(src_wav: str, dst_ogg: str) -> None:
+    """Re-encode one window WAV to mono Opus at ARCHIVE_SR/ARCHIVE_OPUS_KBPS via
+    ffmpeg. ffmpeg (not libsndfile) because only it can pin the Opus bitrate.
+    Raises CalledProcessError on failure — _try_archive contains it."""
+    subprocess.run(
+        ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", src_wav,
+         "-ac", "1", "-ar", str(ARCHIVE_SR), "-c:a", "libopus", "-b:a", f"{ARCHIVE_OPUS_KBPS}k",
+         dst_ogg],
+        check=True, capture_output=True,
+    )
+
+
+def _archive_has_room() -> bool:
+    """Storage cap: stop archiving before the disk runs low. A free-space guard
+    (O(1)) rather than a SUM(bytes) ledger scan — it is cheap at scale AND sees
+    pressure from every disk user, not just the archive. Free space is
+    filesystem-wide, so check the nearest EXISTING ancestor (the archive dir may
+    not exist yet on first write / in tests)."""
+    p = archive_root()
+    while not p.exists() and p != p.parent:
+        p = p.parent
+    try:
+        return shutil.disk_usage(p).free >= ARCHIVE_MIN_FREE_BYTES
+    except OSError:
+        return False  # nothing resolvable → do not archive
+
+
+def archive_window_clips(
+    conn: Connection, artist_id: str, track_id: str, platform: str, segs: list
 ) -> None:
-    """ADR-021 Tier B: keep the COMPRESSED fetched source clip (not the decoded
-    PCM, not a re-fetchable URL) on the archive volume + record it in
-    audio_clip_archive, so a future embedding-model swap or windowing change
-    decodes locally instead of re-fetching through the acquisition pipeline.
-    Idempotent per track. Wrapped by _try_archive in a savepoint — archiving is
-    strictly best-effort and must never abort the (far more valuable) embed."""
-    src = Path(src_path)
-    size = src.stat().st_size
-    if size <= 1024:  # truncated/empty clip — nothing worth keeping
+    """ADR-021 Tier B: keep a compressed copy of this track's EMBEDDED window
+    clips (the staged WAVs the model just embedded), so a future model swap or
+    windowing change re-embeds locally instead of re-fetching. The embed path's
+    WAVs are untouched — we read them and write separate Opus copies under
+    <archive>/<artist>/<track>/<start>_<end>.ogg. Idempotent per track (replaces
+    the dir wholesale, so a re-prep with fewer windows leaves no stale files).
+    Wrapped by _try_archive in a savepoint — strictly best-effort."""
+    global _archive_capped_logged
+    if not segs:
         return
-    rel = f"{artist_id}/{track_id}{src.suffix or '.bin'}"
-    dst = archive_root() / rel
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dst)
+    if not _archive_has_room():
+        if not _archive_capped_logged:
+            log.warning(
+                "archive cap hit: < %d GB free at %s — skipping clip archival",
+                ARCHIVE_MIN_FREE_BYTES // 1024**3, archive_root(),
+            )
+            _archive_capped_logged = True
+        return
+    track_dir = archive_root() / str(artist_id) / str(track_id)
+    shutil.rmtree(track_dir, ignore_errors=True)  # idempotent re-prep
+    track_dir.mkdir(parents=True, exist_ok=True)
+    total = 0
+    for start_s, end_s, wav_path in segs:
+        if not Path(wav_path).exists():
+            continue
+        out = track_dir / f"{start_s}_{end_s}.ogg"
+        _encode_opus(str(wav_path), str(out))
+        total += out.stat().st_size
+    if total == 0:
+        shutil.rmtree(track_dir, ignore_errors=True)
+        return
     conn.execute(
         "INSERT INTO audio_clip_archive (track_id, artist_id, platform, rel_path, bytes) "
         "VALUES (%s, %s, %s, %s, %s) "
         "ON CONFLICT (track_id) DO UPDATE SET "
         "artist_id = EXCLUDED.artist_id, platform = EXCLUDED.platform, "
         "rel_path = EXCLUDED.rel_path, bytes = EXCLUDED.bytes, archived_at = now()",
-        (track_id, artist_id, platform, rel, size),
+        (track_id, artist_id, platform, f"{artist_id}/{track_id}", total),
     )
 
 
 def _try_archive(
-    conn: Connection, artist_id: str, track_id: str, platform: str, src_path: str
+    conn: Connection, artist_id: str, track_id: str, platform: str, segs: list
 ) -> None:
-    """Savepoint-guarded archive: a failure (volume unmounted, bad path, table
-    missing pre-migration) rolls back ONLY the archive write and is logged — the
-    surrounding prep/embed transaction proceeds untouched."""
+    """Savepoint-guarded archive: any failure (ffmpeg error, volume unmounted, DB
+    error) rolls back ONLY the archive write and is logged — the surrounding
+    prep/embed transaction proceeds untouched."""
     try:
         with conn.transaction():
-            archive_source_clip(conn, artist_id, track_id, platform, src_path)
+            archive_window_clips(conn, artist_id, track_id, platform, segs)
     except Exception:
-        log.exception("source-clip archive failed for track %s", track_id)
+        log.exception("clip archive failed for track %s", track_id)
 
 
 def refresh_artist_centroid(
@@ -413,8 +468,8 @@ def embed_artist_clips(
             segs = _clips_for_track(mono, native_sr, path, platform, duration_s, workdir, str(tid))
             for seg in segs:
                 usable.append((tid, *seg))
-            if segs:  # ADR-021 Tier B: keep the compressed source before workdir is GC'd
-                _try_archive(conn, artist_id, str(tid), platform, path)
+            if segs:  # ADR-021 Tier B: archive compressed window clips before workdir is GC'd
+                _try_archive(conn, artist_id, str(tid), platform, segs)
             if heads:
                 from pipeline.heads import HeadContext, run_heads
 

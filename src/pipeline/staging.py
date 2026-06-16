@@ -118,9 +118,9 @@ def prep_artist(
         except Exception:  # noqa: BLE001 — flag-only feature, prep must not fail on it
             pass
         segs = _clips_for_track(mono, sr, path, platform, duration_s, adir, str(tid))
-        # ADR-021 Tier B: keep the compressed source clip before this stage dir is
-        # GC'd post-embed, so a model swap / windowing change re-analyzes locally.
-        _try_archive(conn, str(artist_id), str(tid), platform, str(path))
+        # ADR-021 Tier B: archive a compressed copy of the embedded window clips
+        # before this stage dir is GC'd, so a model swap / re-window re-embeds locally.
+        _try_archive(conn, str(artist_id), str(tid), platform, segs)
         manifest.append({
             "track_id": str(tid),
             "platform": platform,
