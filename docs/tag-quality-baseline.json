@@ -1,0 +1,4749 @@
+{
+  "factory": {
+    "tagged_artists": 116149,
+    "total_rows": 4645960,
+    "distinct_tags": 2123,
+    "assignment_rate_histogram": {
+      "ge_15pct": 22,
+      "ge_10pct": 84,
+      "ge_5pct": 243,
+      "ge_1pct": 824,
+      "total_tags": 2123
+    },
+    "top100_concentration_pct": "32.2",
+    "avg_magnet_load_per_artist": 11.71,
+    "named_magnet_rate_pct": {
+      "kilapanga": 21.9,
+      "zamrock": 20.6,
+      "geek rock": 20.6,
+      "orthodox pop": 19.4,
+      "fm synthesis": 19.1,
+      "pumpcore": 19.0,
+      "pop ra\u00ef": 18.7,
+      "j-rock": 18.5,
+      "hyperpop": 12.1,
+      "mod revival": 13.1
+    }
+  },
+  "serving": {
+    "published_artists": 114047,
+    "avg_published_tags_per_artist": 9.6,
+    "assignment_rate_histogram": {
+      "ge_15pct": 0,
+      "ge_10pct": 0,
+      "ge_5pct": 30,
+      "ge_1pct": 264,
+      "total_tags": 1933
+    },
+    "tags_served_ge_5pct": 30,
+    "named_magnet_served_pct": {
+      "kilapanga": 4.5,
+      "zamrock": 2.0,
+      "geek rock": 6.6,
+      "orthodox pop": 7.5,
+      "fm synthesis": 8.0,
+      "pumpcore": 8.8,
+      "pop ra\u00ef": 5.2,
+      "j-rock": 6.9,
+      "hyperpop": 8.9,
+      "mod revival": 8.4
+    },
+    "spot_check_sample": [
+      {
+        "name": "Thaehan",
+        "mb_tagged": true,
+        "tags": {
+          "ond\u014d": 5,
+          "b\u00e9l\u00e9": 4,
+          "humppa": 4,
+          "danmono": 5,
+          "nasheed": 5,
+          "hard nrg": 5,
+          "mashcore": 4,
+          "pornogrind": 5,
+          "dikir barat": 5,
+          "post-hardcore": 4
+        }
+      },
+      {
+        "name": "Dead man dancin'",
+        "mb_tagged": true,
+        "tags": {
+          "ars nova": 3,
+          "city pop": 3,
+          "synth-pop": 2,
+          "synth funk": 3,
+          "avant-garde": 2,
+          "mod revival": 5,
+          "jovem guarda": 2,
+          "orthodox pop": 3,
+          "space age pop": 4,
+          "avant-garde pop": 2
+        }
+      },
+      {
+        "name": "the motan",
+        "mb_tagged": true,
+        "tags": {
+          "gumbe": 2,
+          "cyberpunk": 2,
+          "stornello": 2,
+          "ng\u00e2m th\u01a1": 4,
+          "spacesynth": 2,
+          "acholitronix": 2,
+          "hyper techno": 2,
+          "purple sound": 2,
+          "gamelan degung": 2,
+          "funk automotivo": 2
+        }
+      },
+      {
+        "name": "Staffers",
+        "mb_tagged": true,
+        "tags": {
+          "aor": 2,
+          "lied": 2,
+          "indorock": 2,
+          "kundiman": 2,
+          "udigrudi": 2,
+          "aquacrunk": 2,
+          "verbunkos": 1,
+          "c\u1ea3i l\u01b0\u01a1ng": 2,
+          "anatolian rock": 2,
+          "post-punk revival": 1
+        }
+      },
+      {
+        "name": "\u05e8\u05d1\u05e7\u05d4 \u05de\u05d9\u05db\u05d0\u05dc\u05d9",
+        "mb_tagged": true,
+        "tags": {
+          "aor": 4,
+          "pop": 4,
+          "izlan": 5,
+          "kunqu": 3,
+          "rabiz": 4,
+          "zamrock": 4,
+          "\u02bb\u014dte\u02bba": 4,
+          "pop kreatif": 4,
+          "c\u1ea3i l\u01b0\u01a1ng": 4,
+          "chanson fran\u00e7aise": 4
+        }
+      },
+      {
+        "name": "Kento Fujimori",
+        "mb_tagged": true,
+        "tags": {
+          "d-beat": 9,
+          "britcore": 8,
+          "pumpcore": 7,
+          "impromptu": 10,
+          "uzun hava": 8,
+          "yue opera": 8,
+          "complextro": 7,
+          "pornogrind": 9,
+          "fm synthesis": 6,
+          "g\u00e9nero grande": 7
+        }
+      },
+      {
+        "name": "Jackass Penguins",
+        "mb_tagged": true,
+        "tags": {
+          "aor": 4,
+          "pop": 3,
+          "izlan": 5,
+          "rabiz": 3,
+          "folk pop": 3,
+          "udigrudi": 4,
+          "cybergrind": 4,
+          "anatolian rock": 3,
+          "singer-songwriter": 3,
+          "alternative country": 3
+        }
+      },
+      {
+        "name": "Chandra Shukla",
+        "mb_tagged": true,
+        "tags": {
+          "zydeco": 3,
+          "neurohop": 2,
+          "sound art": 3,
+          "ambient dub": 2,
+          "ambient plugg": 2,
+          "black ambient": 2,
+          "donosti sound": 2,
+          "impressionism": 2,
+          "ritual ambient": 3,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "Meluran",
+        "mb_tagged": true,
+        "tags": {
+          "ebm": 3,
+          "d-beat": 2,
+          "pluggnb": 2,
+          "britcore": 2,
+          "hyperpop": 2,
+          "complextro": 2,
+          "spacesynth": 1,
+          "fm synthesis": 2,
+          "post-dubstep": 2,
+          "hi-tech full-on": 2
+        }
+      },
+      {
+        "name": "Fredo Zupi",
+        "mb_tagged": true,
+        "tags": {
+          "soca": 3,
+          "ch\u00e8o": 4,
+          "rasin": 4,
+          "afox\u00ea": 3,
+          "colind\u0103": 4,
+          "cabo zouk": 3,
+          "kalindula": 4,
+          "kontakion": 3,
+          "son cubano": 4,
+          "villancico": 3
+        }
+      },
+      {
+        "name": "Sheer Cerebral Power",
+        "mb_tagged": true,
+        "tags": {
+          "j-rock": 3,
+          "art rock": 3,
+          "zeitoper": 2,
+          "anti-folk": 3,
+          "krautrock": 3,
+          "post-rock": 3,
+          "sufi rock": 2,
+          "mod revival": 2,
+          "space rock revival": 2,
+          "rock urbano mexicano": 2
+        }
+      },
+      {
+        "name": "The Superjesus",
+        "mb_tagged": true,
+        "tags": {
+          "crunk": 2,
+          "j-rock": 2,
+          "bacardi": 2,
+          "teen pop": 2,
+          "geek rock": 2,
+          "kilapanga": 2,
+          "krautrock": 3,
+          "raga rock": 2,
+          "verbunkos": 2,
+          "heartland rock": 2
+        }
+      },
+      {
+        "name": "Cole the King",
+        "mb_tagged": true,
+        "tags": {
+          "drill": 4,
+          "britcore": 5,
+          "hyperpop": 4,
+          "uk drill": 4,
+          "xtra raw": 4,
+          "uk garage": 4,
+          "dark garage": 5,
+          "kadongo kamu": 3,
+          "candombe beat": 4,
+          "new york drill": 4
+        }
+      },
+      {
+        "name": "Brokaw",
+        "mb_tagged": true,
+        "tags": {
+          "rock": 2,
+          "gothic": 2,
+          "hardstep": 3,
+          "hard rock": 2,
+          "punk blues": 2,
+          "garage rock": 2,
+          "gothic rock": 3,
+          "sleaze rock": 3,
+          "alternative punk": 2,
+          "alternative rock": 3
+        }
+      },
+      {
+        "name": "\uff22\uff4c\uff41\uff4e\uff4b\uff0e\uff5a\uff4f\uff45\uff59 \u309e\u30e7\u95b2",
+        "mb_tagged": true,
+        "tags": {
+          "britpop": 1,
+          "dangdut": 2,
+          "dubstyle": 2,
+          "hip house": 1,
+          "spacesynth": 1,
+          "synth funk": 2,
+          "ambient dub": 1,
+          "electronica": 2,
+          "lo-fi house": 1,
+          "electronicore": 4
+        }
+      },
+      {
+        "name": "Beautiful Eulogy",
+        "mb_tagged": true,
+        "tags": {
+          "ebm": 1
+        }
+      },
+      {
+        "name": "Untold Stories",
+        "mb_tagged": true,
+        "tags": {
+          "j-rock": 1,
+          "pop rock": 1,
+          "pub rock": 1,
+          "teen pop": 2,
+          "heartland rock": 1
+        }
+      },
+      {
+        "name": "Dead Snares",
+        "mb_tagged": true,
+        "tags": {
+          "g-funk": 3,
+          "europop": 3,
+          "fon leb": 4,
+          "bytebeat": 3,
+          "eurobeat": 3,
+          "post-rock": 3,
+          "festival trap": 3,
+          "electroacoustic": 3,
+          "footwork jungle": 2,
+          "minneapolis sound": 3
+        }
+      },
+      {
+        "name": "Whiner",
+        "mb_tagged": true,
+        "tags": {
+          "j-rock": 3,
+          "indie pop": 2,
+          "krautrock": 2,
+          "raga rock": 2,
+          "indie rock": 3,
+          "indie surf": 2,
+          "anatolian rock": 2,
+          "alternative pop": 2,
+          "alternative rock": 2,
+          "post-punk revival": 3
+        }
+      },
+      {
+        "name": "Sad Numbers",
+        "mb_tagged": true,
+        "tags": {
+          "j-rock": 2,
+          "pop rock": 2,
+          "pub rock": 2,
+          "indie pop": 2,
+          "raga rock": 2,
+          "indie rock": 3,
+          "rock musical": 2,
+          "alternative pop": 3,
+          "alternative rock": 2,
+          "post-punk revival": 2
+        }
+      },
+      {
+        "name": "COPKILLER420",
+        "mb_tagged": true,
+        "tags": {
+          "makina": 3,
+          "britcore": 4,
+          "pumpcore": 4,
+          "chillsynth": 3,
+          "ng\u00e2m th\u01a1": 4,
+          "spacesynth": 4,
+          "hypertechno": 4,
+          "fm synthesis": 4,
+          "liquid riddim": 3,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "7 Hour Darkness Invasion",
+        "mb_tagged": true,
+        "tags": {
+          "aor": 2,
+          "folk pop": 3,
+          "udigrudi": 3,
+          "folk punk": 3,
+          "folk rock": 3,
+          "cybergrind": 3,
+          "c\u1ea3i l\u01b0\u01a1ng": 3,
+          "anatolian rock": 4,
+          "alternative folk": 2,
+          "alternative country": 3
+        }
+      },
+      {
+        "name": "Alice Gift",
+        "mb_tagged": true,
+        "tags": {
+          "gaana": 2,
+          "anti-folk": 2,
+          "kilapanga": 2,
+          "post-punk": 4,
+          "mod revival": 3,
+          "vedic chant": 2,
+          "orthodox pop": 3,
+          "post-britpop": 3,
+          "post-punk revival": 2,
+          "space rock revival": 3
+        }
+      },
+      {
+        "name": "ColorJaxx",
+        "mb_tagged": true,
+        "tags": {
+          "diva house": 1,
+          "euro house": 2,
+          "speed house": 1,
+          "electro-funk": 1,
+          "french house": 2,
+          "jackin house": 2,
+          "ballroom house": 3,
+          "hi-tech full-on": 1
+        }
+      },
+      {
+        "name": "Melanie Baker",
+        "mb_tagged": true,
+        "tags": {
+          "j-rock": 2,
+          "vanera": 2,
+          "bacardi": 2,
+          "anti-folk": 2,
+          "krautrock": 2,
+          "powerstomp": 2,
+          "proto-punk": 2,
+          "rocksteady": 2,
+          "mod revival": 3,
+          "orthodox pop": 2
+        }
+      },
+      {
+        "name": "Jonny Hawkins",
+        "mb_tagged": true,
+        "tags": {
+          "dubstyle": 1,
+          "pumpcore": 1,
+          "brutal prog": 1,
+          "harsh noise": 1
+        }
+      },
+      {
+        "name": "Segmentix",
+        "mb_tagged": true,
+        "tags": {
+          "crunk": 2,
+          "shanto": 2,
+          "tiento": 2,
+          "bhangra": 2,
+          "cuarteto": 3,
+          "crunkcore": 3,
+          "eletrofunk": 2,
+          "proto-punk": 2,
+          "power noise": 2,
+          "kawaii metal": 2
+        }
+      },
+      {
+        "name": "Fuckpony",
+        "mb_tagged": true,
+        "tags": {
+          "hi-tech": 2,
+          "spacesynth": 2,
+          "hypertechno": 3,
+          "technobanda": 2,
+          "electro-funk": 3,
+          "techno kay\u014d": 3,
+          "electronicore": 3,
+          "hi-tech full-on": 3,
+          "nerdcore techno": 2,
+          "peak time techno": 2
+        }
+      },
+      {
+        "name": "Victory",
+        "mb_tagged": true,
+        "tags": {
+          "bagad": 2,
+          "ballad": 2,
+          "red song": 2,
+          "loner folk": 3,
+          "vocal surf": 2,
+          "mod revival": 2,
+          "orthodox pop": 3,
+          "oriental ballad": 2,
+          "chanson \u00e0 texte": 2,
+          "chanson fran\u00e7aise": 2
+        }
+      },
+      {
+        "name": "\u05e0\u05e7\u05e8",
+        "mb_tagged": true,
+        "tags": {
+          "emo rap": 3,
+          "hip hop": 2,
+          "hiplife": 2,
+          "pop rap": 2,
+          "rapcore": 3,
+          "chap hop": 3,
+          "frat rap": 2,
+          "rap rock": 3,
+          "scam rap": 3,
+          "ragga hip-hop": 2
+        }
+      },
+      {
+        "name": "Terror Cell",
+        "mb_tagged": true,
+        "tags": {
+          "deathstep": 2,
+          "hard beat": 3,
+          "hard drum": 3,
+          "hard trap": 3,
+          "hardstyle": 3,
+          "brutal prog": 3,
+          "power noise": 3,
+          "stoner rock": 2,
+          "kawaii metal": 2,
+          "early hardstyle": 3
+        }
+      },
+      {
+        "name": "Dave Fyans",
+        "mb_tagged": true,
+        "tags": {
+          "ambient": 1,
+          "danmono": 3,
+          "omutibo": 2,
+          "\u010dalgija": 1,
+          "dreampunk": 2,
+          "uk garage": 3,
+          "ambient dub": 3,
+          "dark garage": 2,
+          "son montuno": 3,
+          "audio documentary": 2
+        }
+      },
+      {
+        "name": "LORYANN",
+        "mb_tagged": true,
+        "tags": {
+          "k-pop": 1,
+          "vallenato": 2
+        }
+      },
+      {
+        "name": "Dawn Williams",
+        "mb_tagged": true,
+        "tags": {
+          "g-funk": 4,
+          "j-euro": 3,
+          "tex-mex": 3,
+          "ori deck": 3,
+          "pasodoble": 4,
+          "rawphoric": 4,
+          "nh\u1ea1c \u0111\u1ecf": 4,
+          "expressionism": 4,
+          "g\u00e9nero grande": 4,
+          "burger-highlife": 3
+        }
+      },
+      {
+        "name": "Petrol Bastard",
+        "mb_tagged": true,
+        "tags": {
+          "3-step": 3,
+          "dubstyle": 5,
+          "pumpcore": 6,
+          "xtra raw": 4,
+          "kilapanga": 3,
+          "ng\u00e2m th\u01a1": 4,
+          "spacesynth": 3,
+          "acholitronix": 3,
+          "fm synthesis": 4,
+          "modern hardtek": 3
+        }
+      },
+      {
+        "name": "Paul Bazooka",
+        "mb_tagged": true,
+        "tags": {
+          "edm": 4,
+          "c-pop": 5,
+          "piphat": 5,
+          "dubstyle": 4,
+          "hyperpop": 4,
+          "impromptu": 5,
+          "uzun hava": 4,
+          "yue opera": 4,
+          "funk de bh": 4,
+          "fm synthesis": 6
+        }
+      },
+      {
+        "name": "Emptyset",
+        "mb_tagged": true,
+        "tags": {
+          "uk drill": 4,
+          "darksynth": 3,
+          "deathcore": 3,
+          "psybreaks": 3,
+          "ghettotech": 3,
+          "ng\u00e2m th\u01a1": 3,
+          "ghetto funk": 3,
+          "purple sound": 3,
+          "psychploitation": 3,
+          "downtempo deathcore": 3
+        }
+      },
+      {
+        "name": "Willy Tea Taylor",
+        "mb_tagged": true,
+        "tags": {
+          "klapa": 2,
+          "nerdcore": 2,
+          "udigrudi": 2,
+          "country rock": 2,
+          "drinking song": 2,
+          "anatolian rock": 2,
+          "southern gospel": 2,
+          "canzone d'autore": 2,
+          "alternative country": 4,
+          "progressive country": 2
+        }
+      },
+      {
+        "name": "Baby\u2010E",
+        "mb_tagged": true,
+        "tags": {
+          "emo rap": 3,
+          "pop rap": 3,
+          "rapcore": 3,
+          "chap hop": 2,
+          "frat rap": 3,
+          "punk rap": 3,
+          "rap rock": 3,
+          "scam rap": 4,
+          "chicano rap": 3,
+          "ragga hip-hop": 2
+        }
+      },
+      {
+        "name": "Katja Institute",
+        "mb_tagged": true,
+        "tags": {
+          "fungi": 2,
+          "genge": 2,
+          "parang": 2,
+          "uk drill": 2,
+          "deathcore": 2,
+          "psybreaks": 2,
+          "horrorcore": 2,
+          "ambient dub": 2,
+          "black ambient": 2,
+          "funk ostenta\u00e7\u00e3o": 2
+        }
+      },
+      {
+        "name": "Fuck You, Idiot",
+        "mb_tagged": true,
+        "tags": {
+          "rock": 2,
+          "crunk": 2,
+          "pop punk": 3,
+          "raw punk": 2,
+          "crunkcore": 2,
+          "punk rock": 2,
+          "crust punk": 2,
+          "skate punk": 2,
+          "seishun punk": 2,
+          "neon pop punk": 3
+        }
+      },
+      {
+        "name": "Andy Leka",
+        "mb_tagged": true,
+        "tags": {
+          "edm": 2,
+          "trap edm": 2,
+          "diva house": 1,
+          "euro house": 2,
+          "funk de bh": 1,
+          "speed house": 2,
+          "jackin house": 1,
+          "bubbling house": 1
+        }
+      },
+      {
+        "name": "Whispering Jackie",
+        "mb_tagged": true,
+        "tags": {
+          "crunk": 2,
+          "crunkcore": 2,
+          "geek rock": 1,
+          "speedcore": 1,
+          "eletrofunk": 2,
+          "uptempo hardcore": 1
+        }
+      },
+      {
+        "name": "Pestily",
+        "mb_tagged": true,
+        "tags": {
+          "drill": 3,
+          "d-beat": 3,
+          "hyperpop": 5,
+          "ori deck": 3,
+          "rawphoric": 4,
+          "uk garage": 3,
+          "funk de bh": 5,
+          "g\u00e9nero grande": 3,
+          "new york drill": 3,
+          "audio documentary": 4
+        }
+      },
+      {
+        "name": "Season of the Senses",
+        "mb_tagged": true,
+        "tags": {
+          "britpop": 4,
+          "algorave": 5,
+          "britcore": 4,
+          "fandango": 4,
+          "new rave": 4,
+          "impromptu": 6,
+          "kilapanga": 3,
+          "post-rock": 4,
+          "mod revival": 4,
+          "post-britpop": 4
+        }
+      },
+      {
+        "name": "Mars Today",
+        "mb_tagged": true,
+        "tags": {
+          "r&b": 2,
+          "k-pop": 2,
+          "ond\u014d": 3,
+          "v-pop": 2,
+          "cururu": 2,
+          "qawwali": 2,
+          "boom bap": 2,
+          "chap hop": 2,
+          "reggaeton": 2,
+          "ragga hip-hop": 3
+        }
+      },
+      {
+        "name": "Jason Koth",
+        "mb_tagged": true,
+        "tags": {
+          "punto": 4,
+          "danmono": 5,
+          "kalattut": 3,
+          "dreampunk": 4,
+          "sound art": 3,
+          "uk garage": 3,
+          "ambient dub": 4,
+          "post-hardcore": 3,
+          "audio documentary": 4,
+          "minneapolis sound": 3
+        }
+      },
+      {
+        "name": "JAD",
+        "mb_tagged": true,
+        "tags": {
+          "crunk": 2,
+          "bhangra": 3,
+          "crunkcore": 3,
+          "eletrofunk": 2,
+          "brutal prog": 2,
+          "power noise": 2,
+          "kawaii metal": 3,
+          "early hardstyle": 2,
+          "uptempo hardcore": 2,
+          "freeform hardcore": 2
+        }
+      },
+      {
+        "name": "Marisa Liz",
+        "mb_tagged": true,
+        "tags": {
+          "pop": 3,
+          "gaana": 4,
+          "izlan": 4,
+          "ballad": 3,
+          "indorock": 3,
+          "pop ra\u00ef": 3,
+          "orthodox pop": 4,
+          "c\u1ea3i l\u01b0\u01a1ng": 3,
+          "chanson \u00e0 texte": 3,
+          "chanson fran\u00e7aise": 3
+        }
+      },
+      {
+        "name": "Swing Deal",
+        "mb_tagged": true,
+        "tags": {
+          "gaana": 2,
+          "zouk love": 2,
+          "trallalero": 2,
+          "suomisaundi": 2,
+          "russian chanson": 2,
+          "canzone d'autore": 2,
+          "chanson \u00e0 texte": 2,
+          "chanson r\u00e9aliste": 2,
+          "chanson fran\u00e7aise": 3,
+          "chanson qu\u00e9b\u00e9coise": 3
+        }
+      },
+      {
+        "name": "Bradi Cerebri Ectomia",
+        "mb_tagged": true,
+        "tags": {
+          "vanera": 1,
+          "deathcore": 1,
+          "deathrock": 1,
+          "deathstep": 1,
+          "hard beat": 1,
+          "hard trap": 1,
+          "deathgrind": 2,
+          "turbo-folk": 2,
+          "brutal prog": 2,
+          "power noise": 1
+        }
+      },
+      {
+        "name": "Prisco",
+        "mb_tagged": true,
+        "tags": {
+          "ond\u014d": 5,
+          "cururu": 6,
+          "bacardi": 3,
+          "britpop": 4,
+          "emocore": 6,
+          "algorave": 4,
+          "fandango": 5,
+          "hip house": 4,
+          "yue opera": 5,
+          "pornogrind": 5
+        }
+      },
+      {
+        "name": "Aconitum",
+        "mb_tagged": true,
+        "tags": {
+          "deathrock": 3,
+          "deathstep": 4,
+          "grindcore": 3,
+          "deathgrind": 3,
+          "thrashcore": 3,
+          "brutal prog": 3,
+          "kawaii metal": 3,
+          "terror plugg": 3,
+          "avant-garde metal": 3,
+          "dissonant black metal": 3
+        }
+      },
+      {
+        "name": "Kito",
+        "mb_tagged": true,
+        "tags": {
+          "edm": 3,
+          "k-pop": 3,
+          "ori deck": 3,
+          "pumpcore": 3,
+          "trap edm": 3,
+          "rawphoric": 4,
+          "yue opera": 3,
+          "funk de bh": 5,
+          "balani show": 3,
+          "fm synthesis": 3
+        }
+      },
+      {
+        "name": "Fante\u2019s Dust",
+        "mb_tagged": true,
+        "tags": {
+          "crunk": 3,
+          "art rock": 2,
+          "hardstep": 2,
+          "frat rock": 3,
+          "geek rock": 3,
+          "hard beat": 3,
+          "hardstyle": 3,
+          "rock kapak": 3,
+          "gothic rock": 2,
+          "sleaze rock": 3
+        }
+      },
+      {
+        "name": "Husky Loops",
+        "mb_tagged": true,
+        "tags": {
+          "hexd": 5,
+          "punk": 7,
+          "njuup": 5,
+          "ytpmv": 6,
+          "embolada": 7,
+          "fandango": 6,
+          "hyperpop": 7,
+          "pumpcore": 6,
+          "uk drill": 4,
+          "uaajeerneq": 4
+        }
+      },
+      {
+        "name": "Gabi Ferraz",
+        "mb_tagged": true,
+        "tags": {
+          "hi-tech": 3,
+          "lecture": 2,
+          "vallenato": 4,
+          "folktronica": 2,
+          "funktronica": 2,
+          "hypertechno": 1,
+          "livetronica": 3,
+          "electro-funk": 2,
+          "hi-tech full-on": 3
+        }
+      },
+      {
+        "name": "Jack",
+        "mb_tagged": true,
+        "tags": {
+          "j-rock": 3,
+          "bacardi": 3,
+          "indorock": 3,
+          "pop rock": 3,
+          "udigrudi": 4,
+          "kilapanga": 3,
+          "krautrock": 3,
+          "orthodox pop": 3,
+          "anatolian rock": 3,
+          "heartland rock": 3
+        }
+      },
+      {
+        "name": "tenby",
+        "mb_tagged": true,
+        "tags": {
+          "q-pop": 5,
+          "piphat": 4,
+          "art pop": 3,
+          "ars nova": 3,
+          "uzun hava": 4,
+          "avant-garde": 4,
+          "nh\u1ea1c \u0111\u1ecf": 4,
+          "expressionism": 3,
+          "dennery segment": 4,
+          "hi-tech full-on": 4
+        }
+      },
+      {
+        "name": "YUNG DORI",
+        "mb_tagged": true,
+        "tags": {
+          "falak": 4,
+          "ond\u014d": 5,
+          "v-pop": 5,
+          "cururu": 5,
+          "d-beat": 5,
+          "britcore": 4,
+          "impromptu": 6,
+          "complextro": 4,
+          "pornogrind": 6,
+          "dikir barat": 5
+        }
+      },
+      {
+        "name": "Nimo",
+        "mb_tagged": true,
+        "tags": {
+          "k-pop": 4,
+          "rabiz": 2,
+          "dangdut": 3,
+          "chap hop": 2,
+          "afro trap": 2,
+          "hip house": 2,
+          "reggaeton": 3,
+          "dance-punk": 2,
+          "pop yeh-yeh": 2,
+          "ragga hip-hop": 3
+        }
+      },
+      {
+        "name": "Neil Sedaka",
+        "mb_tagged": true,
+        "tags": {
+          "gaana": 3,
+          "gospel": 2,
+          "moe song": 3,
+          "zouk love": 3,
+          "orthodox pop": 3,
+          "chanson \u00e0 texte": 3,
+          "piosenka aktorska": 3,
+          "chanson fran\u00e7aise": 2,
+          "contemporary gospel": 3,
+          "urban contemporary gospel": 2
+        }
+      },
+      {
+        "name": "Tor",
+        "mb_tagged": true,
+        "tags": {
+          "hyperpop": 4,
+          "loud kei": 3,
+          "anti-folk": 3,
+          "ambient dub": 3,
+          "dikir barat": 5,
+          "mambo urbano": 5,
+          "post-britpop": 3,
+          "post-hardcore": 4,
+          "burger-highlife": 4,
+          "minneapolis sound": 3
+        }
+      },
+      {
+        "name": "Nelly",
+        "mb_tagged": true,
+        "tags": {
+          "emo pop": 2,
+          "pop ra\u00ef": 3,
+          "dream pop": 3,
+          "indie pop": 2,
+          "noise pop": 2,
+          "power pop": 2,
+          "vocal surf": 5,
+          "operatic pop": 4,
+          "progressive pop": 2,
+          "psychedelic pop": 4
+        }
+      },
+      {
+        "name": "Vernon Duke",
+        "mb_tagged": true,
+        "tags": {
+          "concerto": 2,
+          "post-bop": 2,
+          "classical": 2,
+          "madchester": 2,
+          "orchestral": 2,
+          "black noise": 3,
+          "jersey sound": 2,
+          "odissi classical": 3,
+          "musique concr\u00e8te": 2,
+          "classical crossover": 2
+        }
+      },
+      {
+        "name": "Justin Rutledge",
+        "mb_tagged": true,
+        "tags": {
+          "zolo": 5,
+          "ballad": 5,
+          "zeybek": 5,
+          "danmono": 5,
+          "avanzada": 5,
+          "loud kei": 5,
+          "mashcore": 5,
+          "red song": 5,
+          "hapa haole": 4,
+          "post-britpop": 4
+        }
+      },
+      {
+        "name": "Adriano Maria Maiello",
+        "mb_tagged": true,
+        "tags": {
+          "lambada": 6,
+          "algorave": 7,
+          "fandango": 6,
+          "pasodoble": 6,
+          "post-rock": 6,
+          "troparion": 6,
+          "avant-folk": 5,
+          "post-britpop": 6,
+          "post-hardcore": 7,
+          "passion setting": 6
+        }
+      },
+      {
+        "name": "DJ SUN",
+        "mb_tagged": true,
+        "tags": {
+          "fijiri": 2,
+          "lounge": 1,
+          "downtempo": 2,
+          "hip house": 2,
+          "taquirari": 2,
+          "microhouse": 2,
+          "mambo urbano": 3,
+          "east coast hip hop": 2,
+          "free improvisation": 2,
+          "old school hip hop": 1
+        }
+      },
+      {
+        "name": "Toontje Lager",
+        "mb_tagged": true,
+        "tags": {
+          "pop": 4,
+          "pop ra\u00ef": 4,
+          "pop rock": 3,
+          "noise pop": 3,
+          "synth-pop": 3,
+          "pop ghazal": 4,
+          "pop kreatif": 4,
+          "orthodox pop": 3,
+          "c\u1ea3i l\u01b0\u01a1ng": 3,
+          "chanson fran\u00e7aise": 3
+        }
+      },
+      {
+        "name": "Supermarkt",
+        "mb_tagged": true,
+        "tags": {
+          "aor": 2,
+          "rock": 3,
+          "gothic": 2,
+          "zamrock": 3,
+          "indorock": 4,
+          "geek rock": 2,
+          "dance-rock": 2,
+          "indie rock": 2,
+          "changjak gugak": 2,
+          "alternative punk": 2
+        }
+      },
+      {
+        "name": "No Coffin",
+        "mb_tagged": true,
+        "tags": {
+          "metal": 3,
+          "deathrock": 3,
+          "grindcore": 3,
+          "hardstyle": 3,
+          "metalcore": 3,
+          "funk metal": 3,
+          "post-metal": 3,
+          "thrashcore": 3,
+          "trap metal": 3,
+          "gothic metal": 3
+        }
+      },
+      {
+        "name": "Melo Green",
+        "mb_tagged": true,
+        "tags": {
+          "go-go": 3,
+          "ballad": 3,
+          "hi-nrg": 3,
+          "fandango": 4,
+          "gommance": 4,
+          "loud kei": 4,
+          "anti-folk": 3,
+          "mod revival": 5,
+          "orthodox pop": 3,
+          "chipmunk soul": 3
+        }
+      },
+      {
+        "name": "Glass Hammer",
+        "mb_tagged": true,
+        "tags": {
+          "salegy": 4,
+          "bacardi": 4,
+          "min'y\u014d": 4,
+          "zeitoper": 5,
+          "kilapanga": 4,
+          "post-rock": 5,
+          "mod revival": 6,
+          "orthodox pop": 4,
+          "township jive": 4,
+          "heartland rock": 4
+        }
+      },
+      {
+        "name": "Wurtz",
+        "mb_tagged": true,
+        "tags": {
+          "euro house": 1,
+          "ghettotech": 2,
+          "techno kay\u014d": 1,
+          "big room house": 1,
+          "detroit techno": 1,
+          "new york drill": 1,
+          "nerdcore techno": 2,
+          "peak time techno": 1
+        }
+      },
+      {
+        "name": "The B.Goodes",
+        "mb_tagged": true,
+        "tags": {
+          "klapa": 2,
+          "verbunkos": 1,
+          "waulking song": 1,
+          "third wave ska": 1,
+          "contemporary gospel": 1
+        }
+      },
+      {
+        "name": "Jaro Sounder",
+        "mb_tagged": true,
+        "tags": {
+          "kafi": 5,
+          "mbube": 5,
+          "cururu": 7,
+          "tex-mex": 5,
+          "algorave": 6,
+          "fandango": 5,
+          "anti-folk": 4,
+          "post-rock": 5,
+          "yue opera": 6,
+          "dikir barat": 6
+        }
+      },
+      {
+        "name": "HawaiiHockey",
+        "mb_tagged": true,
+        "tags": {
+          "ond\u014d": 1,
+          "d-beat": 1,
+          "danmono": 2,
+          "nasheed": 2,
+          "mashcore": 1,
+          "old-time": 2,
+          "uk garage": 2,
+          "yue opera": 2,
+          "dikir barat": 1,
+          "night full-on": 2
+        }
+      },
+      {
+        "name": "Malcolm Gordon",
+        "mb_tagged": true,
+        "tags": {
+          "bagad": 2,
+          "izlan": 2,
+          "folkhop": 2,
+          "folk pop": 2,
+          "wyrd folk": 2,
+          "slam poetry": 2,
+          "chanson \u00e0 texte": 2,
+          "chanson r\u00e9aliste": 3,
+          "singer-songwriter": 3,
+          "chanson fran\u00e7aise": 3
+        }
+      },
+      {
+        "name": "Valter Horvat",
+        "mb_tagged": true,
+        "tags": {
+          "electronic": 2,
+          "electropop": 3,
+          "spacesynth": 2,
+          "synth funk": 2,
+          "electro hop": 2,
+          "electronica": 3,
+          "electropunk": 4,
+          "technobanda": 2,
+          "fm synthesis": 3,
+          "electronicore": 3
+        }
+      },
+      {
+        "name": "Zapruder",
+        "mb_tagged": true,
+        "tags": {
+          "hardstep": 3,
+          "deathstep": 3,
+          "grindcore": 2,
+          "hard beat": 3,
+          "hard trap": 3,
+          "hardstyle": 3,
+          "post-metal": 2,
+          "thrashcore": 2,
+          "brutal prog": 3,
+          "kawaii metal": 2
+        }
+      },
+      {
+        "name": "Christiaan Bakker",
+        "mb_tagged": true,
+        "tags": {
+          "kafi": 4,
+          "drill": 3,
+          "mathcore": 3,
+          "minatory": 3,
+          "ori deck": 4,
+          "rawphoric": 4,
+          "funk de bh": 4,
+          "shashmaqam": 3,
+          "duranguense": 4,
+          "g\u00e9nero grande": 4
+        }
+      },
+      {
+        "name": "Grade Pending",
+        "mb_tagged": true,
+        "tags": {
+          "pop": 3,
+          "izlan": 2,
+          "j-rock": 2,
+          "bacardi": 2,
+          "emo pop": 2,
+          "indorock": 3,
+          "pop ra\u00ef": 2,
+          "pop kreatif": 2,
+          "c\u1ea3i l\u01b0\u01a1ng": 3,
+          "alternative folk": 2
+        }
+      },
+      {
+        "name": "Adale Jackson",
+        "mb_tagged": true,
+        "tags": {
+          "ond\u014d": 8,
+          "ballad": 5,
+          "cururu": 8,
+          "britpop": 7,
+          "mor lam": 6,
+          "nasheed": 8,
+          "mallsoft": 6,
+          "mashcore": 6,
+          "dariacore": 6,
+          "post-britpop": 6
+        }
+      },
+      {
+        "name": "Walk the Rail",
+        "mb_tagged": true,
+        "tags": {
+          "vanera": 4,
+          "bhangra": 4,
+          "embolada": 5,
+          "troparion": 3,
+          "powerstomp": 3,
+          "stoner rap": 3,
+          "turbo-folk": 4,
+          "kadongo kamu": 3,
+          "liquid riddim": 3,
+          "early hardstyle": 3
+        }
+      },
+      {
+        "name": "Alisa Xayalith",
+        "mb_tagged": true,
+        "tags": {
+          "emo pop": 2,
+          "pop ra\u00ef": 2,
+          "twee pop": 2,
+          "dream pop": 2,
+          "jangle pop": 2,
+          "ambient pop": 3,
+          "mod revival": 3,
+          "pop kreatif": 2,
+          "neo-city pop": 2,
+          "orthodox pop": 3
+        }
+      },
+      {
+        "name": "Ryan Elliott",
+        "mb_tagged": true,
+        "tags": {
+          "pumpcore": 3,
+          "technoid": 3,
+          "hip house": 3,
+          "jersey club": 3,
+          "son montuno": 4,
+          "technobanda": 3,
+          "ghetto house": 3,
+          "techno kay\u014d": 3,
+          "electronicore": 3,
+          "peak time techno": 3
+        }
+      },
+      {
+        "name": "Flinrite",
+        "mb_tagged": true,
+        "tags": {
+          "d-beat": 1,
+          "dubstep": 1,
+          "pluggnb": 1,
+          "hyperpop": 3,
+          "detroit trap": 3,
+          "post-dubstep": 2,
+          "riddim dubstep": 1
+        }
+      },
+      {
+        "name": "Markus Johansson",
+        "mb_tagged": true,
+        "tags": {
+          "vanera": 3,
+          "bhangra": 3,
+          "eletrofunk": 3,
+          "sea shanty": 3,
+          "turbo-folk": 3,
+          "brutal prog": 2,
+          "power noise": 2,
+          "stoner rock": 3,
+          "kawaii metal": 3,
+          "early hardstyle": 3
+        }
+      },
+      {
+        "name": "Avondlicht",
+        "mb_tagged": true,
+        "tags": {
+          "hyperpop": 3,
+          "dreampunk": 4,
+          "uk garage": 3,
+          "complextro": 3,
+          "ambient dub": 4,
+          "post-britpop": 3,
+          "impressionism": 3,
+          "post-hardcore": 3,
+          "new york drill": 2,
+          "audio documentary": 4
+        }
+      },
+      {
+        "name": "Babsi Tollwut",
+        "mb_tagged": true,
+        "tags": {
+          "cururu": 1,
+          "hip hop": 2,
+          "hiplife": 3,
+          "boom bap": 3,
+          "chap hop": 3,
+          "fandango": 1,
+          "hip house": 2,
+          "gangsta rap": 2,
+          "berlin school": 2,
+          "ragga hip-hop": 2
+        }
+      },
+      {
+        "name": "Christian Vidal",
+        "mb_tagged": true,
+        "tags": {
+          "hyphy": 3,
+          "t-pop": 3,
+          "yayue": 4,
+          "vanera": 4,
+          "anti-folk": 4,
+          "troparion": 3,
+          "turbo-folk": 3,
+          "mod revival": 4,
+          "township jive": 4,
+          "holy minimalism": 3
+        }
+      },
+      {
+        "name": "Mr And Ms Grey",
+        "mb_tagged": true,
+        "tags": {
+          "hi-tech": 2,
+          "hyperpop": 2,
+          "pumpcore": 2,
+          "ghettotech": 2,
+          "hypertechno": 3,
+          "fm synthesis": 2,
+          "kadongo kamu": 2,
+          "techno kay\u014d": 2,
+          "detroit techno": 2,
+          "nerdcore techno": 1
+        }
+      },
+      {
+        "name": "Xiluva Tom\u00e1s",
+        "mb_tagged": true,
+        "tags": {
+          "amapiano": 2,
+          "afro-jazz": 2,
+          "afropiano": 1,
+          "latin pop": 2,
+          "runo song": 1,
+          "samba soul": 2,
+          "samba-rock": 1,
+          "chanson \u00e0 texte": 2,
+          "chanson r\u00e9aliste": 2,
+          "chanson fran\u00e7aise": 2
+        }
+      },
+      {
+        "name": "House Fire Kid",
+        "mb_tagged": true,
+        "tags": {
+          "punto": 3,
+          "j-euro": 3,
+          "hyperpop": 3,
+          "mashcore": 3,
+          "anti-folk": 4,
+          "post-rock": 3,
+          "avant-folk": 3,
+          "avant-prog": 3,
+          "complextro": 4,
+          "mod revival": 3
+        }
+      },
+      {
+        "name": "M9RVEN",
+        "mb_tagged": true,
+        "tags": {
+          "ond\u014d": 10,
+          "cururu": 11,
+          "d-beat": 10,
+          "fon leb": 11,
+          "nasheed": 11,
+          "sardana": 9,
+          "britcore": 10,
+          "impromptu": 12,
+          "uk garage": 9,
+          "yue opera": 11
+        }
+      },
+      {
+        "name": "S\u00e0bba",
+        "mb_tagged": true,
+        "tags": {
+          "pirekua": 2,
+          "afro rock": 2,
+          "bard rock": 1,
+          "sufi rock": 1,
+          "desert rock": 2,
+          "gothic rock": 1,
+          "anatolian rock": 1,
+          "mainstream rock": 2,
+          "alternative rock": 2,
+          "psychedelic rock": 2
+        }
+      },
+      {
+        "name": "Clyde Spencer",
+        "mb_tagged": true,
+        "tags": {
+          "hyperpop": 1,
+          "detroit trap": 2
+        }
+      },
+      {
+        "name": "Roy Hamilton",
+        "mb_tagged": true,
+        "tags": {
+          "filmi": 1,
+          "gaana": 1,
+          "jazz pop": 1,
+          "post-bop": 1,
+          "zouk love": 2,
+          "orchestral jazz": 1,
+          "chanson \u00e0 texte": 1,
+          "chanson fran\u00e7aise": 2,
+          "chanson qu\u00e9b\u00e9coise": 1
+        }
+      },
+      {
+        "name": "emorave",
+        "mb_tagged": true,
+        "tags": {
+          "falak": 2,
+          "v-pop": 3,
+          "d-beat": 2,
+          "pluggnb": 2,
+          "impromptu": 2,
+          "pornogrind": 2,
+          "anarcho-punk": 2,
+          "detroit trap": 3,
+          "post-dubstep": 3,
+          "candombe beat": 2
+        }
+      },
+      {
+        "name": "latency",
+        "mb_tagged": true,
+        "tags": {
+          "ambient": 3,
+          "danmono": 3,
+          "chillstep": 2,
+          "dreampunk": 4,
+          "ambient dub": 3,
+          "psychedelic": 1,
+          "sound collage": 2,
+          "space ambient": 2,
+          "ritual ambient": 2,
+          "ambient noise wall": 2
+        }
+      },
+      {
+        "name": "Raiden",
+        "mb_tagged": true,
+        "tags": {
+          "breaks": 3,
+          "break-in": 3,
+          "breakbeat": 2,
+          "breakcore": 3,
+          "breakstep": 3,
+          "speedcore": 3,
+          "acid breaks": 3,
+          "speed garage": 3,
+          "breakbeat kota": 2,
+          "breakbeat hardcore": 2
+        }
+      },
+      {
+        "name": "Monzanto",
+        "mb_tagged": true,
+        "tags": {
+          "dubstyle": 2,
+          "ng\u00e2m th\u01a1": 4,
+          "spacesynth": 3,
+          "synth funk": 3,
+          "acid trance": 2,
+          "euro-trance": 3,
+          "acholitronix": 3,
+          "fm synthesis": 4,
+          "techno kay\u014d": 3,
+          "detroit techno": 3
+        }
+      },
+      {
+        "name": "Bruce Petherick",
+        "mb_tagged": true,
+        "tags": {
+          "ballad": 1
+        }
+      },
+      {
+        "name": "Diego Faco",
+        "mb_tagged": true,
+        "tags": {
+          "murga": 3,
+          "chalga": 3,
+          "raggatek": 3,
+          "raggacore": 3,
+          "reggaeton": 3,
+          "reggae-pop": 3,
+          "changa tuki": 3,
+          "fusion gugak": 3,
+          "s\u00e9ga tambour": 3,
+          "changjak gugak": 3
+        }
+      },
+      {
+        "name": "Patrulha do Espa\u00e7o",
+        "mb_tagged": true,
+        "tags": {
+          "rock": 3,
+          "crunk": 3,
+          "vanera": 3,
+          "zamrock": 3,
+          "frat rock": 2,
+          "geek rock": 3,
+          "math rock": 2,
+          "lovers rock": 3,
+          "rock musical": 3,
+          "euphoric hardstyle": 3
+        }
+      },
+      {
+        "name": "Adriana Spina",
+        "mb_tagged": true,
+        "tags": {
+          "bagad": 3,
+          "j-rock": 3,
+          "bacardi": 2,
+          "algorave": 3,
+          "fandango": 3,
+          "zeitoper": 3,
+          "anti-folk": 3,
+          "post-rock": 4,
+          "mod revival": 3,
+          "post-britpop": 3
+        }
+      },
+      {
+        "name": "Fatso",
+        "mb_tagged": true,
+        "tags": {
+          "britcore": 4,
+          "pumpcore": 3,
+          "beat fino": 6,
+          "impromptu": 4,
+          "rawphoric": 5,
+          "uk garage": 3,
+          "funk de bh": 4,
+          "pornogrind": 4,
+          "son montuno": 3,
+          "new york drill": 3
+        }
+      },
+      {
+        "name": "$-Crew",
+        "mb_tagged": true,
+        "tags": {
+          "k-pop": 2,
+          "dangdut": 2,
+          "hiplife": 2,
+          "pop rap": 2,
+          "chap hop": 3,
+          "fandango": 2,
+          "afro trap": 2,
+          "hip house": 2,
+          "reggaeton": 2,
+          "ragga hip-hop": 3
+        }
+      },
+      {
+        "name": "Roma Ocean",
+        "mb_tagged": true,
+        "tags": {
+          "ond\u014d": 4,
+          "thall": 4,
+          "britpop": 3,
+          "full-on": 4,
+          "britcore": 3,
+          "hyperpop": 4,
+          "impromptu": 4,
+          "pornogrind": 5,
+          "new york drill": 4,
+          "burger-highlife": 3
+        }
+      },
+      {
+        "name": "Malva",
+        "mb_tagged": true,
+        "tags": {
+          "bagad": 3,
+          "izlan": 3,
+          "ballad": 3,
+          "folk pop": 2,
+          "red song": 4,
+          "wyrd folk": 3,
+          "loner folk": 3,
+          "chanson r\u00e9aliste": 2,
+          "singer-songwriter": 3,
+          "chanson fran\u00e7aise": 3
+        }
+      },
+      {
+        "name": "Dirzo",
+        "mb_tagged": true,
+        "tags": {
+          "hip hop": 1,
+          "hiplife": 2,
+          "chap hop": 2,
+          "ragga hip-hop": 1
+        }
+      },
+      {
+        "name": "Zafer Dilek",
+        "mb_tagged": true,
+        "tags": {
+          "n\u00f3ta": 3,
+          "agbekor": 3,
+          "bantengan": 3,
+          "henan opera": 3,
+          "persian pop": 3,
+          "shibuya-kei": 3,
+          "miejski folk": 3,
+          "cumbia chilena": 3,
+          "algerian chaabi": 3,
+          "kantan chamorrita": 3
+        }
+      },
+      {
+        "name": "Christopher Willits",
+        "mb_tagged": true,
+        "tags": {
+          "b\u00e9l\u00e9": 3,
+          "zydeco": 3,
+          "danmono": 3,
+          "dariacore": 2,
+          "dreampunk": 3,
+          "ambient dub": 3,
+          "heaven trap": 3,
+          "ambient plugg": 2,
+          "ritual ambient": 3,
+          "sinfonia concertante": 3
+        }
+      },
+      {
+        "name": "Rae McAlister",
+        "mb_tagged": true,
+        "tags": {
+          "izlan": 5,
+          "britpop": 6,
+          "danmono": 7,
+          "emocore": 8,
+          "algorave": 6,
+          "fandango": 6,
+          "mallsoft": 6,
+          "red song": 6,
+          "post-britpop": 5,
+          "post-hardcore": 6
+        }
+      },
+      {
+        "name": "The Totem Polemen",
+        "mb_tagged": true,
+        "tags": {
+          "aor": 2,
+          "rock": 2,
+          "j-rock": 3,
+          "bacardi": 3,
+          "indorock": 3,
+          "pop rock": 2,
+          "udigrudi": 3,
+          "aquacrunk": 2,
+          "geek rock": 3,
+          "kilapanga": 2
+        }
+      },
+      {
+        "name": "Yung Earle",
+        "mb_tagged": true,
+        "tags": {
+          "ond\u014d": 5,
+          "ytpmv": 6,
+          "cururu": 5,
+          "piphat": 5,
+          "britcore": 5,
+          "hyperpop": 5,
+          "pumpcore": 4,
+          "impromptu": 6,
+          "yue opera": 4,
+          "pornogrind": 6
+        }
+      },
+      {
+        "name": "Gory\u014d",
+        "mb_tagged": true,
+        "tags": {
+          "j-core": 3,
+          "kizomba": 2,
+          "s\u014dkyoku": 3,
+          "shinkyoku": 2,
+          "idol kay\u014d": 3,
+          "kay\u014dkyoku": 3,
+          "mood kay\u014d": 3,
+          "chinese opera": 3,
+          "yangzhou opera": 3,
+          "guangdong yinyue": 3
+        }
+      },
+      {
+        "name": "Straya",
+        "mb_tagged": true,
+        "tags": {
+          "j-rock": 3,
+          "salegy": 3,
+          "art rock": 3,
+          "fandango": 3,
+          "indorock": 3,
+          "zeitoper": 4,
+          "anti-folk": 3,
+          "post-punk": 3,
+          "sufi rock": 3,
+          "burmese mono": 3
+        }
+      },
+      {
+        "name": "Ghostwood",
+        "mb_tagged": true,
+        "tags": {
+          "j-rock": 3,
+          "vanera": 3,
+          "bhangra": 3,
+          "embolada": 5,
+          "anti-folk": 3,
+          "krautrock": 3,
+          "post-punk": 3,
+          "proto-punk": 3,
+          "turbo-folk": 3,
+          "kadongo kamu": 3
+        }
+      },
+      {
+        "name": "Greco",
+        "mb_tagged": true,
+        "tags": {
+          "rock": 2,
+          "crunk": 2,
+          "pub rock": 2,
+          "geek rock": 3,
+          "raga rock": 3,
+          "verbunkos": 2,
+          "lovers rock": 3,
+          "rock musical": 3,
+          "anatolian rock": 2,
+          "rock urbano mexicano": 2
+        }
+      },
+      {
+        "name": "Hotten Totten",
+        "mb_tagged": true,
+        "tags": {
+          "edm": 3,
+          "piphat": 2,
+          "dubstyle": 2,
+          "new rave": 2,
+          "trap edm": 2,
+          "impromptu": 3,
+          "spacesynth": 2,
+          "pop yeh-yeh": 2,
+          "turntablism": 2,
+          "fm synthesis": 2
+        }
+      },
+      {
+        "name": "Stellar Dreams",
+        "mb_tagged": true,
+        "tags": {
+          "hi-tech": 4,
+          "chillsynth": 3,
+          "ghettotech": 3,
+          "spacesynth": 4,
+          "synth funk": 4,
+          "hypertechno": 3,
+          "electro-funk": 4,
+          "fm synthesis": 3,
+          "funk automotivo": 4,
+          "hi-tech full-on": 5
+        }
+      },
+      {
+        "name": "Eric Dutton",
+        "mb_tagged": true,
+        "tags": {
+          "j-pop": 4,
+          "k-pop": 3,
+          "ond\u014d": 4,
+          "t-pop": 3,
+          "v-pop": 4,
+          "cururu": 4,
+          "d-beat": 6,
+          "g-funk": 3,
+          "impromptu": 5,
+          "pornogrind": 4
+        }
+      },
+      {
+        "name": "Lost Years",
+        "mb_tagged": true,
+        "tags": {
+          "njuup": 3,
+          "t-pop": 2,
+          "tejano": 2,
+          "britcore": 3,
+          "cuarteto": 2,
+          "crunkcore": 2,
+          "speedcore": 2,
+          "eletrofunk": 2,
+          "proto-punk": 3,
+          "euphoric hardstyle": 2
+        }
+      },
+      {
+        "name": "Sote",
+        "mb_tagged": true,
+        "tags": {
+          "eai": 3,
+          "hexd": 3,
+          "makina": 3,
+          "parang": 4,
+          "hypertechno": 4,
+          "isicathamiya": 3,
+          "kadongo kamu": 3,
+          "liquid riddim": 3,
+          "muzika mizrahit": 3,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "Providencia",
+        "mb_tagged": true,
+        "tags": {
+          "murga": 3,
+          "ragga": 3,
+          "s\u00e9ga": 3,
+          "dangak": 3,
+          "dangdut": 3,
+          "raggatek": 3,
+          "raggacore": 3,
+          "changa tuki": 3,
+          "fusion gugak": 3,
+          "samba-reggae": 3
+        }
+      },
+      {
+        "name": "Alpha Drop",
+        "mb_tagged": true,
+        "tags": {
+          "ebm": 4,
+          "d-beat": 5,
+          "piphat": 3,
+          "britcore": 5,
+          "hyperpop": 5,
+          "impromptu": 6,
+          "complextro": 4,
+          "fm synthesis": 4,
+          "post-dubstep": 4,
+          "hi-tech full-on": 4
+        }
+      },
+      {
+        "name": "Primal Tyrant",
+        "mb_tagged": true,
+        "tags": {
+          "bhangra": 3,
+          "deathstep": 4,
+          "deathgrind": 4,
+          "brutal prog": 4,
+          "harsh noise": 4,
+          "terror plugg": 3,
+          "anglican chant": 3,
+          "military cadence": 3,
+          "dissonant black metal": 3,
+          "nh\u1ea1c ti\u1ec1n chi\u1ebfn": 4
+        }
+      },
+      {
+        "name": "IE",
+        "mb_tagged": true,
+        "tags": {
+          "ytpmv": 3,
+          "full-on": 3,
+          "new rave": 3,
+          "xtra raw": 3,
+          "barbershop": 4,
+          "beat bolha": 3,
+          "chicano rap": 3,
+          "dark garage": 2,
+          "anarcho-punk": 5,
+          "candombe beat": 3
+        }
+      },
+      {
+        "name": "Hospise",
+        "mb_tagged": true,
+        "tags": {
+          "crunk": 3,
+          "crunkcore": 2,
+          "frat rock": 2,
+          "geek rock": 3,
+          "krautrock": 2,
+          "sigidrigi": 2,
+          "eletrofunk": 3,
+          "brutal prog": 2,
+          "stoner rock": 2,
+          "kawaii metal": 2
+        }
+      },
+      {
+        "name": "Living~Stone",
+        "mb_tagged": true,
+        "tags": {
+          "d-beat": 4,
+          "britcore": 3,
+          "hyperpop": 4,
+          "uk garage": 4,
+          "yue opera": 3,
+          "complextro": 3,
+          "dikir barat": 3,
+          "kadongo kamu": 3,
+          "g\u00e9nero grande": 4,
+          "audio documentary": 4
+        }
+      },
+      {
+        "name": "Inci3Ion",
+        "mb_tagged": true,
+        "tags": {
+          "ebm": 3,
+          "d-beat": 3,
+          "g-funk": 2,
+          "britcore": 3,
+          "hyperpop": 2,
+          "pumpcore": 2,
+          "impromptu": 3,
+          "complextro": 4,
+          "audio documentary": 3,
+          "sinfonia concertante": 2
+        }
+      },
+      {
+        "name": "Vakker",
+        "mb_tagged": true,
+        "tags": {
+          "deathrock": 2,
+          "deathstep": 3,
+          "grindcore": 3,
+          "hard trap": 3,
+          "hardstyle": 2,
+          "thrashcore": 2,
+          "brutal prog": 3,
+          "horror punk": 2,
+          "dissonant black metal": 2,
+          "dissonant death metal": 2
+        }
+      },
+      {
+        "name": "Guy Pratt",
+        "mb_tagged": true,
+        "tags": {
+          "lied": 2,
+          "rock": 2,
+          "pop rock": 3,
+          "verbunkos": 2,
+          "rock musical": 2,
+          "christian rock": 3,
+          "chanson \u00e0 texte": 2,
+          "chanson fran\u00e7aise": 2,
+          "contemporary gospel": 3,
+          "urban contemporary gospel": 2
+        }
+      },
+      {
+        "name": "Aryeh Kunstler",
+        "mb_tagged": true,
+        "tags": {
+          "gaana": 2,
+          "ballad": 3,
+          "europop": 2,
+          "birdsong": 2,
+          "pop ra\u00ef": 2,
+          "ambient pop": 2,
+          "mod revival": 3,
+          "pop kreatif": 2,
+          "orthodox pop": 3,
+          "oriental ballad": 3
+        }
+      },
+      {
+        "name": "Schedule IV",
+        "mb_tagged": true,
+        "tags": {
+          "pumpcore": 2,
+          "anti-folk": 2,
+          "impromptu": 2,
+          "speedcore": 2,
+          "proto-punk": 1,
+          "spacesynth": 1,
+          "turbo-folk": 2,
+          "fm synthesis": 1,
+          "kadongo kamu": 2,
+          "funk automotivo": 1
+        }
+      },
+      {
+        "name": "Funk ReverSe",
+        "mb_tagged": true,
+        "tags": {
+          "ax\u00e9": 4,
+          "vude": 4,
+          "cururu": 3,
+          "nasheed": 4,
+          "hyperpop": 5,
+          "balani show": 4,
+          "mambo urbano": 5,
+          "expressionism": 4,
+          "burger-highlife": 3,
+          "graphical sound": 3
+        }
+      },
+      {
+        "name": "Maliboux",
+        "mb_tagged": true,
+        "tags": {
+          "edm": 3,
+          "pluggnb": 3,
+          "dubstyle": 2,
+          "trap edm": 4,
+          "funk de bh": 2,
+          "future rave": 3,
+          "fm synthesis": 2,
+          "post-dubstep": 2,
+          "future bounce": 2,
+          "kawaii future bass": 2
+        }
+      },
+      {
+        "name": "Tales of Nebelheym",
+        "mb_tagged": true,
+        "tags": {
+          "aor": 2,
+          "land\u00f3": 2,
+          "folkhop": 2,
+          "folk pop": 2,
+          "udigrudi": 3,
+          "dark folk": 2,
+          "folk rock": 2,
+          "wyrd folk": 2,
+          "miejski folk": 2,
+          "psychedelic folk": 2
+        }
+      },
+      {
+        "name": "Bryan Scary",
+        "mb_tagged": true,
+        "tags": {
+          "pop": 2,
+          "gaana": 3,
+          "goombay": 2,
+          "gommance": 2,
+          "pop ra\u00ef": 2,
+          "orthodox pop": 3,
+          "c\u1ea3i l\u01b0\u01a1ng": 2,
+          "chanson \u00e0 texte": 2,
+          "chanson fran\u00e7aise": 2,
+          "contemporary gospel": 2
+        }
+      },
+      {
+        "name": "The Swing Bot",
+        "mb_tagged": true,
+        "tags": {
+          "ax\u00e9": 2,
+          "vude": 2,
+          "nasheed": 2,
+          "hyperpop": 3,
+          "old-time": 2,
+          "hip house": 3,
+          "yue opera": 2,
+          "balani show": 3,
+          "burger-highlife": 2,
+          "hi-tech full-on": 3
+        }
+      },
+      {
+        "name": "Valdemiro Jos\u00e9",
+        "mb_tagged": true,
+        "tags": {
+          "pop": 3,
+          "rabiz": 4,
+          "pop ra\u00ef": 3,
+          "latin pop": 2,
+          "moombahton": 3,
+          "pop ghazal": 2,
+          "pop kreatif": 3,
+          "chanson \u00e0 texte": 3,
+          "chanson r\u00e9aliste": 2,
+          "chanson fran\u00e7aise": 3
+        }
+      },
+      {
+        "name": "Ambur",
+        "mb_tagged": true,
+        "tags": {
+          "art rock": 3,
+          "krautrock": 3,
+          "raga rock": 3,
+          "sufi rock": 3,
+          "desert rock": 3,
+          "gothic rock": 3,
+          "anatolian rock": 4,
+          "mainstream rock": 3,
+          "alternative rock": 3,
+          "psychedelic rock": 3
+        }
+      },
+      {
+        "name": "\u8089\u7403\u30dd\u30b3\u30dd\u30b3\u56e3",
+        "mb_tagged": true,
+        "tags": {
+          "ska": 3,
+          "rock": 2,
+          "skacore": 2,
+          "pop punk": 3,
+          "raw punk": 2,
+          "ska punk": 2,
+          "punk rock": 2,
+          "skate punk": 3,
+          "neon pop punk": 3,
+          "changjak gugak": 2
+        }
+      },
+      {
+        "name": "Eats Everything",
+        "mb_tagged": true,
+        "tags": {
+          "piphat": 3,
+          "dubstyle": 3,
+          "hyperpop": 4,
+          "pumpcore": 3,
+          "hip house": 3,
+          "funk de bh": 3,
+          "ghettotech": 3,
+          "spacesynth": 2,
+          "balani show": 3,
+          "fm synthesis": 3
+        }
+      },
+      {
+        "name": "Stupid Fuckin People",
+        "mb_tagged": true,
+        "tags": {
+          "crunk": 3,
+          "bhangra": 2,
+          "cuarteto": 2,
+          "crunkcore": 3,
+          "geek rock": 2,
+          "speedcore": 1,
+          "eletrofunk": 2,
+          "kawaii metal": 2,
+          "early hardstyle": 1,
+          "uptempo hardcore": 1
+        }
+      },
+      {
+        "name": "Anna Appleby",
+        "mb_tagged": true,
+        "tags": {
+          "aita": 4,
+          "fungi": 4,
+          "izlan": 4,
+          "ngoma": 5,
+          "ballad": 4,
+          "manyao": 4,
+          "poetry": 5,
+          "emocore": 8,
+          "fandango": 5,
+          "pasodoble": 5
+        }
+      },
+      {
+        "name": "Kristi Boonzaaier",
+        "mb_tagged": true,
+        "tags": {
+          "falak": 4,
+          "b\u00e9l\u00e9": 4,
+          "oberek": 3,
+          "zydeco": 4,
+          "artcore": 4,
+          "mashcore": 4,
+          "pasodoble": 4,
+          "avant-folk": 4,
+          "emoviolence": 3,
+          "jersey sound": 4
+        }
+      },
+      {
+        "name": "Clouditte",
+        "mb_tagged": true,
+        "tags": {
+          "edm": 4,
+          "d-beat": 3,
+          "pluggnb": 3,
+          "dubstyle": 4,
+          "hyperpop": 3,
+          "trap edm": 4,
+          "impromptu": 4,
+          "fm synthesis": 4,
+          "post-dubstep": 3,
+          "hi-tech full-on": 3
+        }
+      },
+      {
+        "name": "Jamie Jackson",
+        "mb_tagged": true,
+        "tags": {
+          "pop": 2,
+          "izlan": 3,
+          "ballad": 2,
+          "lambada": 2,
+          "amapiano": 2,
+          "red song": 2,
+          "afropiano": 3,
+          "piano rock": 2,
+          "pop kreatif": 2,
+          "chanson r\u00e9aliste": 2
+        }
+      },
+      {
+        "name": "ill-eagle dj's",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 3,
+          "hip house": 3,
+          "diva house": 3,
+          "euro house": 3,
+          "speed house": 3,
+          "technobanda": 3,
+          "techno kay\u014d": 3,
+          "ballroom house": 3,
+          "big room house": 3,
+          "peak time techno": 3
+        }
+      },
+      {
+        "name": "Warm Juice",
+        "mb_tagged": false,
+        "tags": {
+          "folk pop": 2,
+          "acousmatic": 3,
+          "sampledelia": 2,
+          "miejski folk": 2,
+          "neo-acoustic": 3,
+          "acoustic rock": 2,
+          "anatolian rock": 2,
+          "countrypolitan": 2,
+          "psychedelic folk": 3,
+          "neo-medieval folk": 2
+        }
+      },
+      {
+        "name": "WHY KEITH DROPPED THE S",
+        "mb_tagged": false,
+        "tags": {
+          "gothic": 2,
+          "rap metal": 2,
+          "industrial": 2,
+          "horror punk": 2,
+          "experimental": 2,
+          "c\u1ea3i l\u01b0\u01a1ng": 3,
+          "tearout brostep": 3,
+          "crossover thrash": 2,
+          "bakersfield sound": 2,
+          "experimental electronic": 2
+        }
+      },
+      {
+        "name": "wonderground",
+        "mb_tagged": false,
+        "tags": {
+          "diva house": 2,
+          "euro house": 3,
+          "funk de bh": 2,
+          "ghettotech": 2,
+          "speed house": 3,
+          "garage house": 2,
+          "jackin house": 3,
+          "ballroom house": 3,
+          "big room house": 2,
+          "peak time techno": 2
+        }
+      },
+      {
+        "name": "Rintron",
+        "mb_tagged": false,
+        "tags": {
+          "drill": 4,
+          "makina": 3,
+          "parang": 4,
+          "minatory": 4,
+          "pumpcore": 4,
+          "uk drill": 3,
+          "duranguense": 4,
+          "hypertechno": 3,
+          "kadongo kamu": 4,
+          "liquid riddim": 4
+        }
+      },
+      {
+        "name": "ALiX",
+        "mb_tagged": false,
+        "tags": {
+          "punto": 2,
+          "ballad": 2,
+          "b\u00e9l\u00e9": 4,
+          "zydeco": 3,
+          "artcore": 2,
+          "danmono": 4,
+          "mashcore": 2,
+          "dreampunk": 3,
+          "heaven trap": 2,
+          "post-hardcore": 3
+        }
+      },
+      {
+        "name": "Phantasma Disques Archive",
+        "mb_tagged": false,
+        "tags": {
+          "britcore": 3,
+          "dubstyle": 2,
+          "pumpcore": 3,
+          "ng\u00e2m th\u01a1": 4,
+          "spacesynth": 4,
+          "synth funk": 3,
+          "hypertechno": 3,
+          "son montuno": 3,
+          "fm synthesis": 4,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "ELLIPSIS",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 2,
+          "trance 2.0": 1,
+          "technobanda": 2,
+          "techno kay\u014d": 2,
+          "wonky techno": 1,
+          "detroit techno": 3,
+          "peak time techno": 2,
+          "hardgroove techno": 2
+        }
+      },
+      {
+        "name": "L-MENTAL",
+        "mb_tagged": false,
+        "tags": {
+          "techno": 2,
+          "technoid": 3,
+          "trance 2.0": 2,
+          "acid techno": 2,
+          "hard techno": 2,
+          "technobanda": 3,
+          "techno kay\u014d": 3,
+          "wonky techno": 2,
+          "detroit techno": 3,
+          "hardgroove techno": 2
+        }
+      },
+      {
+        "name": "Distant Seas",
+        "mb_tagged": false,
+        "tags": {
+          "b\u00e9l\u00e9": 1,
+          "zeybek": 2,
+          "mashcore": 2,
+          "pub rock": 1,
+          "anti-folk": 2,
+          "post-rock": 2,
+          "mod revival": 1,
+          "ambient americana": 2
+        }
+      },
+      {
+        "name": "DYING MONOLITH HNW",
+        "mb_tagged": false,
+        "tags": {
+          "pirekua": 2,
+          "dhol tasha": 2,
+          "industrial": 2,
+          "progressive": 2,
+          "rain sounds": 2,
+          "experimental": 3,
+          "horror synth": 3,
+          "sound poetry": 2,
+          "progressive electronic": 2,
+          "experimental electronic": 3
+        }
+      },
+      {
+        "name": "Thirty Ghosts",
+        "mb_tagged": false,
+        "tags": {
+          "punto": 1,
+          "dangdut": 1,
+          "dreampunk": 2,
+          "complextro": 2,
+          "synth funk": 1,
+          "ambient dub": 2,
+          "ghetto funk": 1,
+          "post-britpop": 1,
+          "post-hardcore": 2,
+          "audio documentary": 2
+        }
+      },
+      {
+        "name": "Chris Anderson",
+        "mb_tagged": false,
+        "tags": {
+          "ambient": 2,
+          "vocalese": 1,
+          "chillstep": 2,
+          "semi-trot": 3,
+          "sound poetry": 1,
+          "ritual ambient": 1,
+          "post-minimalism": 2,
+          "ambient americana": 1,
+          "free improvisation": 2,
+          "broken transmission": 1
+        }
+      },
+      {
+        "name": "MLE",
+        "mb_tagged": false,
+        "tags": {
+          "pumpcore": 3,
+          "technoid": 3,
+          "hypertechno": 4,
+          "technobanda": 3,
+          "acholitronix": 3,
+          "fm synthesis": 3,
+          "techno kay\u014d": 4,
+          "belgian techno": 3,
+          "detroit techno": 4,
+          "peak time techno": 3
+        }
+      },
+      {
+        "name": "nachtsieger",
+        "mb_tagged": false,
+        "tags": {
+          "pumpcore": 3,
+          "xtra raw": 2,
+          "speedcore": 1,
+          "ng\u00e2m th\u01a1": 2,
+          "trance 2.0": 1,
+          "acholitronix": 2,
+          "fm synthesis": 2,
+          "speed garage": 2,
+          "detroit techno": 2,
+          "hardgroove techno": 2
+        }
+      },
+      {
+        "name": "\u041f\u0440\u0438\u043b\u0435\u0436\u043d\u044b\u0435 \u041b\u044e\u0434\u0438",
+        "mb_tagged": false,
+        "tags": {
+          "noh": 2,
+          "fungi": 3,
+          "genge": 3,
+          "parang": 2,
+          "musette": 2,
+          "kilapanga": 2,
+          "psybreaks": 2,
+          "white voice": 2,
+          "donosti sound": 2,
+          "funk ostenta\u00e7\u00e3o": 2
+        }
+      },
+      {
+        "name": "Moon Eclipse",
+        "mb_tagged": false,
+        "tags": {
+          "fungi": 2,
+          "genge": 1,
+          "neurohop": 1,
+          "harsh noise": 2,
+          "ambient plugg": 2,
+          "black ambient": 2,
+          "donosti sound": 1,
+          "ritual ambient": 1,
+          "funk ostenta\u00e7\u00e3o": 1,
+          "polifonia occitana": 2
+        }
+      },
+      {
+        "name": "glow teeth",
+        "mb_tagged": false,
+        "tags": {
+          "uk82": 2,
+          "danmono": 3,
+          "yue opera": 2,
+          "pornogrind": 1,
+          "post-hardcore": 2
+        }
+      },
+      {
+        "name": "Vahgog",
+        "mb_tagged": false,
+        "tags": {
+          "drill": 2,
+          "hyperpop": 3,
+          "pumpcore": 2,
+          "uk drill": 2,
+          "xtra raw": 2,
+          "hypertechno": 3,
+          "fm synthesis": 2,
+          "techno kay\u014d": 2,
+          "liquid riddim": 3,
+          "detroit techno": 3
+        }
+      },
+      {
+        "name": "unknown - untitled",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 1,
+          "euro house": 1,
+          "ghettotech": 2,
+          "speed house": 1,
+          "garage house": 2,
+          "ghetto house": 2,
+          "wonky techno": 1,
+          "peak time techno": 1
+        }
+      },
+      {
+        "name": "MURMURE INTEMPOREL",
+        "mb_tagged": false,
+        "tags": {
+          "fungi": 3,
+          "makina": 2,
+          "parang": 3,
+          "uk drill": 2,
+          "psybreaks": 2,
+          "black ambient": 3,
+          "impressionism": 2,
+          "liquid riddim": 2,
+          "funk ostenta\u00e7\u00e3o": 3,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "Planet Rhythm",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 3,
+          "ghettotech": 2,
+          "trance 2.0": 2,
+          "acid techno": 2,
+          "technobanda": 3,
+          "techno kay\u014d": 3,
+          "wonky techno": 3,
+          "detroit techno": 3,
+          "peak time techno": 3,
+          "hardgroove techno": 3
+        }
+      },
+      {
+        "name": "Freddy43",
+        "mb_tagged": false,
+        "tags": {
+          "dreampunk": 1,
+          "chillsynth": 1,
+          "spacesynth": 2,
+          "synth funk": 2,
+          "comfy synth": 2,
+          "hypertechno": 2,
+          "electro-funk": 1,
+          "winter synth": 2,
+          "electronicore": 3,
+          "impressionism": 1
+        }
+      },
+      {
+        "name": "Matt J Hart",
+        "mb_tagged": false,
+        "tags": {
+          "makina": 3,
+          "art punk": 3,
+          "spacesynth": 3,
+          "synth funk": 4,
+          "comfy synth": 3,
+          "fm synthesis": 2,
+          "splittercore": 3,
+          "black ambient": 3,
+          "polifonia occitana": 3,
+          "sinfonia concertante": 3
+        }
+      },
+      {
+        "name": "Rence Boat",
+        "mb_tagged": false,
+        "tags": {
+          "makina": 3,
+          "sound art": 3,
+          "comfy synth": 2,
+          "black ambient": 3,
+          "donosti sound": 3,
+          "impressionism": 3,
+          "psychploitation": 3,
+          "audio documentary": 3,
+          "polifonia occitana": 3,
+          "sinfonia concertante": 2
+        }
+      },
+      {
+        "name": "Gon Muruaga",
+        "mb_tagged": false,
+        "tags": {
+          "parang": 3,
+          "anti-folk": 4,
+          "kadongo kamu": 3,
+          "black ambient": 4,
+          "donosti sound": 3,
+          "liquid riddim": 3,
+          "burmese stereo": 3,
+          "psychploitation": 3,
+          "funk ostenta\u00e7\u00e3o": 3,
+          "tembang cianjuran": 3
+        }
+      },
+      {
+        "name": "More Eaze",
+        "mb_tagged": false,
+        "tags": {
+          "asmr": 4,
+          "poetry": 3,
+          "danmono": 5,
+          "omutibo": 3,
+          "algorave": 3,
+          "art song": 3,
+          "fandango": 3,
+          "ambient dub": 3,
+          "white voice": 3,
+          "post-britpop": 4
+        }
+      },
+      {
+        "name": "m a t i c",
+        "mb_tagged": false,
+        "tags": {
+          "makina": 2,
+          "hi-tech": 3,
+          "mathcore": 2,
+          "avant-garde": 2,
+          "hypertechno": 3,
+          "electro-funk": 3,
+          "electronicore": 2,
+          "impressionism": 3,
+          "graphical sound": 2,
+          "hi-tech full-on": 3
+        }
+      },
+      {
+        "name": "Sample+Hold",
+        "mb_tagged": false,
+        "tags": {
+          "techno": 4,
+          "technoid": 4,
+          "acid techno": 4,
+          "hard techno": 3,
+          "techno bass": 4,
+          "technobanda": 4,
+          "hyper techno": 3,
+          "wonky techno": 4,
+          "belgian techno": 3,
+          "minimal techno": 4
+        }
+      },
+      {
+        "name": "Virtual Urban Records",
+        "mb_tagged": false,
+        "tags": {
+          "hyperpop": 4,
+          "ghettotech": 4,
+          "folktronica": 4,
+          "hypertechno": 5,
+          "livetronica": 4,
+          "electro-funk": 3,
+          "techno kay\u014d": 4,
+          "detroit techno": 3,
+          "funk automotivo": 4,
+          "audio documentary": 4
+        }
+      },
+      {
+        "name": "Retrovex",
+        "mb_tagged": false,
+        "tags": {
+          "zydeco": 2,
+          "danmono": 2,
+          "dreampunk": 3,
+          "sound art": 1,
+          "ambient dub": 2,
+          "heaven trap": 2,
+          "winter synth": 2,
+          "ambient plugg": 2,
+          "impressionism": 1,
+          "ritual ambient": 1
+        }
+      },
+      {
+        "name": "Miss Romi",
+        "mb_tagged": false,
+        "tags": {
+          "mbube": 4,
+          "makina": 3,
+          "fandango": 4,
+          "pumpcore": 4,
+          "kilapanga": 3,
+          "ng\u00e2m th\u01a1": 3,
+          "hypertechno": 4,
+          "son montuno": 5,
+          "electronicore": 4,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "Fuselab",
+        "mb_tagged": false,
+        "tags": {
+          "parang": 2,
+          "\u010dalgija": 2,
+          "anti-folk": 3,
+          "ambient dub": 3,
+          "hypertechno": 2,
+          "post-britpop": 2,
+          "post-hardcore": 3,
+          "audio documentary": 3,
+          "minneapolis sound": 3,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "Cosmicleaf Records",
+        "mb_tagged": false,
+        "tags": {
+          "ebm": 2,
+          "makina": 2,
+          "hi-tech": 3,
+          "hyperpop": 3,
+          "dreampunk": 2,
+          "ambient dub": 2,
+          "hypertechno": 3,
+          "impressionism": 3,
+          "hi-tech full-on": 3,
+          "minneapolis sound": 2
+        }
+      },
+      {
+        "name": "Javi Ray",
+        "mb_tagged": false,
+        "tags": {
+          "techno": 3,
+          "technoid": 3,
+          "trance 2.0": 2,
+          "acid trance": 2,
+          "euro-trance": 2,
+          "technobanda": 3,
+          "techno kay\u014d": 3,
+          "wonky techno": 3,
+          "detroit techno": 3,
+          "minimal techno": 2
+        }
+      },
+      {
+        "name": "Sam Luke",
+        "mb_tagged": false,
+        "tags": {
+          "makina": 3,
+          "piphat": 3,
+          "hyperpop": 4,
+          "kalattut": 3,
+          "mathcore": 3,
+          "yue opera": 3,
+          "hypertechno": 4,
+          "electro-funk": 3,
+          "burger-highlife": 3,
+          "hi-tech full-on": 3
+        }
+      },
+      {
+        "name": "Metaphysical Horror",
+        "mb_tagged": false,
+        "tags": {
+          "j-rock": 3,
+          "art rock": 3,
+          "mashcore": 3,
+          "pub rock": 3,
+          "anti-folk": 3,
+          "post-rock": 3,
+          "raga rock": 3,
+          "avant-folk": 3,
+          "proto-punk": 3,
+          "mod revival": 2
+        }
+      },
+      {
+        "name": "Su San",
+        "mb_tagged": false,
+        "tags": {
+          "edm": 3,
+          "j-pop": 3,
+          "ond\u014d": 3,
+          "d-beat": 3,
+          "britpop": 3,
+          "hyperpop": 4,
+          "impromptu": 4,
+          "pornogrind": 3,
+          "mod revival": 4,
+          "burger-highlife": 3
+        }
+      },
+      {
+        "name": "Kris De Ruysscher",
+        "mb_tagged": false,
+        "tags": {
+          "falak": 3,
+          "artcore": 2,
+          "mor lam": 2,
+          "hard nrg": 3,
+          "avant-folk": 2,
+          "avant-prog": 2,
+          "emoviolence": 2,
+          "powerviolence": 2,
+          "g\u00e9nero grande": 3,
+          "sinfonia concertante": 2
+        }
+      },
+      {
+        "name": "Dorio Vanti",
+        "mb_tagged": false,
+        "tags": {
+          "rawphoric": 1,
+          "uk garage": 1,
+          "funk de bh": 2,
+          "fm synthesis": 1,
+          "audio documentary": 1
+        }
+      },
+      {
+        "name": "Pirat Records",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 2,
+          "euro house": 2,
+          "ghettotech": 2,
+          "hypertechno": 2,
+          "technobanda": 3,
+          "ghetto house": 2,
+          "techno kay\u014d": 3,
+          "detroit techno": 2,
+          "peak time techno": 2,
+          "audio documentary": 2
+        }
+      },
+      {
+        "name": "Suture records",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 2,
+          "psytrance": 3,
+          "trance 2.0": 3,
+          "acid trance": 3,
+          "hard techno": 2,
+          "hard trance": 2,
+          "acholitronix": 3,
+          "cadence rampa": 2,
+          "detroit techno": 2,
+          "hardgroove techno": 3
+        }
+      },
+      {
+        "name": "SISIG-0",
+        "mb_tagged": false,
+        "tags": {
+          "thall": 3,
+          "ballad": 2,
+          "danmono": 4,
+          "emocore": 3,
+          "omutibo": 2,
+          "loud kei": 3,
+          "red song": 2,
+          "zeitoper": 2,
+          "post-britpop": 3,
+          "post-hardcore": 3
+        }
+      },
+      {
+        "name": "Enemy Records",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 2,
+          "rawphoric": 2,
+          "ghettotech": 2,
+          "hypertechno": 3,
+          "technobanda": 2,
+          "techno kay\u014d": 3,
+          "detroit techno": 3,
+          "peak time techno": 2,
+          "audio documentary": 1,
+          "hardgroove techno": 2
+        }
+      },
+      {
+        "name": "oud91",
+        "mb_tagged": false,
+        "tags": {
+          "d-beat": 4,
+          "g-funk": 4,
+          "britcore": 4,
+          "impromptu": 5,
+          "vaportrap": 4,
+          "complextro": 3,
+          "nh\u1ea1c \u0111\u1ecf": 4,
+          "post-hardcore": 4,
+          "burger-highlife": 4,
+          "hi-tech full-on": 4
+        }
+      },
+      {
+        "name": "SUEVI Records",
+        "mb_tagged": false,
+        "tags": {
+          "drill": 2,
+          "ghettotech": 4,
+          "spacesynth": 3,
+          "hypertechno": 3,
+          "technobanda": 2,
+          "fm synthesis": 3,
+          "techno kay\u014d": 3,
+          "detroit techno": 2,
+          "funk automotivo": 2,
+          "peak time techno": 3
+        }
+      },
+      {
+        "name": "October One",
+        "mb_tagged": false,
+        "tags": {
+          "edm": 1,
+          "ond\u014d": 2,
+          "pluggnb": 1,
+          "hyperpop": 1,
+          "impromptu": 1,
+          "pornogrind": 2,
+          "anarcho-punk": 2,
+          "fm synthesis": 1,
+          "post-dubstep": 2
+        }
+      },
+      {
+        "name": "Stanislas Bernagaud",
+        "mb_tagged": false,
+        "tags": {
+          "aor": 3,
+          "pop": 3,
+          "filin": 4,
+          "izlan": 4,
+          "rabiz": 3,
+          "bacardi": 4,
+          "indorock": 5,
+          "udigrudi": 3,
+          "c\u1ea3i l\u01b0\u01a1ng": 4,
+          "chanson fran\u00e7aise": 3
+        }
+      },
+      {
+        "name": "Best Things For Worst Living",
+        "mb_tagged": false,
+        "tags": {
+          "britpop": 2,
+          "acidcore": 2,
+          "breakstep": 2,
+          "microhouse": 2,
+          "spacesynth": 2,
+          "synth funk": 2,
+          "electronica": 2,
+          "electropunk": 2,
+          "son montuno": 3,
+          "electronicore": 4
+        }
+      },
+      {
+        "name": "RAW",
+        "mb_tagged": false,
+        "tags": {
+          "edm": 2,
+          "technoid": 2,
+          "xtra raw": 2,
+          "ghettotech": 2,
+          "trance 2.0": 2,
+          "acholitronix": 2,
+          "techno kay\u014d": 2,
+          "detroit techno": 2,
+          "peak time techno": 2,
+          "hardgroove techno": 2
+        }
+      },
+      {
+        "name": "Dialect Recordings",
+        "mb_tagged": false,
+        "tags": {
+          "c-pop": 3,
+          "t-pop": 4,
+          "piphat": 4,
+          "anti-folk": 3,
+          "post-rock": 4,
+          "synth-pop": 3,
+          "chillsynth": 3,
+          "spacesynth": 3,
+          "mod revival": 3,
+          "neo-city pop": 3
+        }
+      },
+      {
+        "name": "Maryam Turkey",
+        "mb_tagged": false,
+        "tags": {
+          "kafi": 3,
+          "brega": 2,
+          "manyao": 3,
+          "funan\u00e1": 3,
+          "zeitoper": 3,
+          "anti-folk": 3,
+          "post-rock": 3,
+          "brega funk": 2,
+          "orthodox pop": 2,
+          "minneapolis sound": 3
+        }
+      },
+      {
+        "name": "Dream Machine",
+        "mb_tagged": false,
+        "tags": {
+          "hi-tech": 2,
+          "euro house": 2,
+          "hypertechno": 2,
+          "speed house": 2,
+          "electro-funk": 3,
+          "jackin house": 2,
+          "electronicore": 2,
+          "ballroom house": 3,
+          "hi-tech full-on": 2,
+          "peak time techno": 1
+        }
+      },
+      {
+        "name": "Electric Appliances",
+        "mb_tagged": false,
+        "tags": {
+          "makina": 4,
+          "fandango": 3,
+          "pumpcore": 4,
+          "uk drill": 3,
+          "ng\u00e2m th\u01a1": 4,
+          "spacesynth": 4,
+          "hypertechno": 4,
+          "son montuno": 4,
+          "fm synthesis": 3,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "Rafael Bacellar",
+        "mb_tagged": false,
+        "tags": {
+          "punto": 7,
+          "j-euro": 5,
+          "art punk": 6,
+          "anti-folk": 6,
+          "dariacore": 5,
+          "pasodoble": 5,
+          "black ambient": 5,
+          "post-hardcore": 7,
+          "burger-highlife": 6,
+          "sinfonia concertante": 5
+        }
+      },
+      {
+        "name": "The Supermarket",
+        "mb_tagged": false,
+        "tags": {
+          "ebm": 3,
+          "britcore": 4,
+          "anti-folk": 3,
+          "kadongo kamu": 4,
+          "donosti sound": 3,
+          "liquid riddim": 3,
+          "psychploitation": 2,
+          "funk ostenta\u00e7\u00e3o": 3,
+          "tembang cianjuran": 2,
+          "space rock revival": 3
+        }
+      },
+      {
+        "name": "Le\u00efla Martial",
+        "mb_tagged": false,
+        "tags": {
+          "aita": 4,
+          "ballad": 4,
+          "g-funk": 6,
+          "zydeco": 5,
+          "mappila": 4,
+          "birdsong": 4,
+          "sh\u014dmy\u014d": 4,
+          "anti-folk": 4,
+          "pasodoble": 4,
+          "merengue t\u00edpico": 4
+        }
+      },
+      {
+        "name": "3dot5",
+        "mb_tagged": false,
+        "tags": {
+          "edm": 1,
+          "hyperpop": 2,
+          "pumpcore": 1,
+          "rawphoric": 1,
+          "funk de bh": 2,
+          "ghettotech": 2,
+          "hypertechno": 1,
+          "speed house": 1,
+          "electro-funk": 1,
+          "peak time techno": 1
+        }
+      },
+      {
+        "name": "MORPHINA",
+        "mb_tagged": false,
+        "tags": {
+          "pumpcore": 2,
+          "afro trap": 1,
+          "speedcore": 1,
+          "funk de bh": 2,
+          "speed garage": 1,
+          "detroit techno": 1,
+          "peak time techno": 1
+        }
+      },
+      {
+        "name": "CRISTIIAN",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 2,
+          "ghettotech": 2,
+          "hypertechno": 2,
+          "technobanda": 1,
+          "fm synthesis": 1,
+          "techno kay\u014d": 2,
+          "detroit techno": 2,
+          "nerdcore techno": 2,
+          "peak time techno": 2,
+          "audio documentary": 2
+        }
+      },
+      {
+        "name": "Garden XL",
+        "mb_tagged": false,
+        "tags": {
+          "fungi": 2,
+          "art song": 3,
+          "uk drill": 2,
+          "sound art": 2,
+          "ng\u00e2m th\u01a1": 2,
+          "white voice": 2,
+          "purple sound": 2,
+          "houston sound": 2,
+          "psychploitation": 2,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "RIISR Editions",
+        "mb_tagged": false,
+        "tags": {
+          "makina": 3,
+          "parang": 3,
+          "pumpcore": 3,
+          "yue opera": 3,
+          "spacesynth": 3,
+          "hypertechno": 4,
+          "son montuno": 3,
+          "psychploitation": 3,
+          "audio documentary": 4,
+          "polifonia occitana": 4
+        }
+      },
+      {
+        "name": "05DYNSTY",
+        "mb_tagged": false,
+        "tags": {
+          "hexd": 3,
+          "parang": 2,
+          "fandango": 3,
+          "pumpcore": 2,
+          "hip house": 2,
+          "microsound": 2,
+          "ng\u00e2m th\u01a1": 2,
+          "group sounds": 2,
+          "psychploitation": 2,
+          "polifonia occitana": 2
+        }
+      },
+      {
+        "name": "Luan Hornich",
+        "mb_tagged": false,
+        "tags": {
+          "fungi": 4,
+          "genge": 3,
+          "parang": 4,
+          "acidcore": 3,
+          "descarga": 3,
+          "fandango": 4,
+          "psybreaks": 3,
+          "donosti sound": 3,
+          "funk ostenta\u00e7\u00e3o": 3,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "We Are Detached",
+        "mb_tagged": false,
+        "tags": {
+          "hyperpop": 3,
+          "darksynth": 2,
+          "complextro": 1,
+          "dark garage": 2,
+          "dikir barat": 2,
+          "detroit trap": 2,
+          "audio documentary": 2
+        }
+      },
+      {
+        "name": "RS Tangent",
+        "mb_tagged": false,
+        "tags": {
+          "pumpcore": 2,
+          "technoid": 2,
+          "uk drill": 3,
+          "xtra raw": 3,
+          "ghettotech": 2,
+          "ng\u00e2m th\u01a1": 4,
+          "son montuno": 4,
+          "technobanda": 2,
+          "techno kay\u014d": 2,
+          "detroit techno": 2
+        }
+      },
+      {
+        "name": "Buiac Records",
+        "mb_tagged": false,
+        "tags": {
+          "hip house": 1,
+          "rawphoric": 1,
+          "uk garage": 1,
+          "euro house": 1,
+          "funk de bh": 1,
+          "ghettotech": 1,
+          "speed house": 2,
+          "ghetto house": 1,
+          "peak time techno": 1,
+          "audio documentary": 2
+        }
+      },
+      {
+        "name": "D\u00d4ME",
+        "mb_tagged": false,
+        "tags": {
+          "drill": 3,
+          "hyperpop": 4,
+          "rawphoric": 4,
+          "funk de bh": 5,
+          "ghettotech": 5,
+          "hypertechno": 4,
+          "livetronica": 3,
+          "speed garage": 3,
+          "techno kay\u014d": 3,
+          "peak time techno": 3
+        }
+      },
+      {
+        "name": "GO.ST",
+        "mb_tagged": false,
+        "tags": {
+          "bagad": 3,
+          "izlan": 2,
+          "art rock": 3,
+          "pub rock": 2,
+          "zeitoper": 3,
+          "anti-folk": 3,
+          "post-punk": 3,
+          "post-rock": 3,
+          "post-britpop": 4,
+          "anatolian rock": 3
+        }
+      },
+      {
+        "name": "Suckerpunch // Papa Nugs",
+        "mb_tagged": false,
+        "tags": {
+          "club": 2,
+          "dance": 2,
+          "house": 3,
+          "dubstyle": 2,
+          "technoid": 2,
+          "hip house": 4,
+          "bass house": 3,
+          "diva house": 3,
+          "slap house": 3,
+          "wonky techno": 2
+        }
+      },
+      {
+        "name": "m.s.moore",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 2,
+          "euro house": 2,
+          "ghettotech": 2,
+          "hypertechno": 3,
+          "technobanda": 2,
+          "techno kay\u014d": 3,
+          "detroit techno": 2,
+          "nerdcore techno": 2,
+          "peak time techno": 2,
+          "audio documentary": 2
+        }
+      },
+      {
+        "name": "David Sanchez Burr",
+        "mb_tagged": false,
+        "tags": {
+          "makina": 3,
+          "parang": 3,
+          "art punk": 2,
+          "dreampunk": 2,
+          "ambient dub": 2,
+          "hypertechno": 3,
+          "black ambient": 2,
+          "impressionism": 3,
+          "audio documentary": 2,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "Fragile Heterosexuality",
+        "mb_tagged": false,
+        "tags": {
+          "dubstyle": 3,
+          "breakstep": 3,
+          "electronic": 2,
+          "electropop": 3,
+          "ng\u00e2m th\u01a1": 2,
+          "spacesynth": 3,
+          "electronica": 3,
+          "electropunk": 3,
+          "technobanda": 2,
+          "electronicore": 4
+        }
+      },
+      {
+        "name": "Profound Sound Music",
+        "mb_tagged": false,
+        "tags": {
+          "diva house": 3,
+          "euro house": 3,
+          "tech house": 3,
+          "french house": 2,
+          "garage house": 3,
+          "ghetto house": 3,
+          "jackin house": 3,
+          "ballroom house": 3,
+          "big room house": 3,
+          "festival progressive house": 3
+        }
+      },
+      {
+        "name": "transmekanik",
+        "mb_tagged": false,
+        "tags": {
+          "punto": 4,
+          "emocore": 5,
+          "algorave": 4,
+          "britcore": 4,
+          "embolada": 4,
+          "fandango": 3,
+          "zeitoper": 3,
+          "post-punk": 3,
+          "post-britpop": 4,
+          "post-hardcore": 4
+        }
+      },
+      {
+        "name": "American Zeno",
+        "mb_tagged": false,
+        "tags": {
+          "darksynth": 3,
+          "rap metal": 2,
+          "industrial": 3,
+          "horror punk": 2,
+          "progressive": 2,
+          "experimental": 2,
+          "tearout brostep": 2,
+          "crossover thrash": 2,
+          "bakersfield sound": 2,
+          "experimental electronic": 2
+        }
+      },
+      {
+        "name": "Telefrag",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 4,
+          "acid techno": 4,
+          "techno bass": 5,
+          "technobanda": 4,
+          "acholitronix": 3,
+          "hyper techno": 4,
+          "techno kay\u014d": 5,
+          "wonky techno": 4,
+          "detroit techno": 5,
+          "peak time techno": 4
+        }
+      },
+      {
+        "name": "Humanoid Gods\u2122",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 2,
+          "ghettotech": 2,
+          "ng\u00e2m th\u01a1": 2,
+          "hypertechno": 3,
+          "son montuno": 2,
+          "technobanda": 2,
+          "ghetto house": 2,
+          "techno kay\u014d": 3,
+          "detroit techno": 2,
+          "audio documentary": 3
+        }
+      },
+      {
+        "name": "Stmul8",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 3,
+          "euro house": 3,
+          "speed house": 3,
+          "technobanda": 3,
+          "garage house": 2,
+          "ghetto house": 3,
+          "techno kay\u014d": 2,
+          "wonky techno": 3,
+          "detroit techno": 2,
+          "peak time techno": 3
+        }
+      },
+      {
+        "name": "JJ Good",
+        "mb_tagged": false,
+        "tags": {
+          "parang": 1,
+          "hyperpop": 2,
+          "anti-folk": 1,
+          "yue opera": 2,
+          "hypertechno": 2,
+          "fm synthesis": 2,
+          "kadongo kamu": 2,
+          "g\u00e9nero grande": 2,
+          "audio documentary": 2,
+          "minneapolis sound": 2
+        }
+      },
+      {
+        "name": "Rohan Feit",
+        "mb_tagged": false,
+        "tags": {
+          "aor": 2,
+          "izlan": 3,
+          "bacardi": 3,
+          "fandango": 4,
+          "indorock": 3,
+          "udigrudi": 2,
+          "ambient pop": 2,
+          "c\u1ea3i l\u01b0\u01a1ng": 4,
+          "alternative folk": 2,
+          "singer-songwriter": 2
+        }
+      },
+      {
+        "name": "dennis aycicek",
+        "mb_tagged": false,
+        "tags": {
+          "noh": 3,
+          "fungi": 3,
+          "deathcore": 3,
+          "psybreaks": 3,
+          "deathgrind": 3,
+          "horrorcore": 3,
+          "harsh noise": 3,
+          "terror plugg": 3,
+          "donosti sound": 3,
+          "funk ostenta\u00e7\u00e3o": 3
+        }
+      },
+      {
+        "name": "Operation X-trasonic Ordinance",
+        "mb_tagged": false,
+        "tags": {
+          "bhangra": 3,
+          "cuarteto": 2,
+          "deathgrind": 2,
+          "eletrofunk": 3,
+          "turbo-folk": 3,
+          "brutal prog": 3,
+          "liquid funk": 2,
+          "kadongo kamu": 3,
+          "donosti sound": 3,
+          "liquid riddim": 2
+        }
+      },
+      {
+        "name": "placeholder name",
+        "mb_tagged": false,
+        "tags": {
+          "fungi": 3,
+          "makina": 3,
+          "parang": 4,
+          "pumpcore": 4,
+          "uk drill": 3,
+          "ng\u00e2m th\u01a1": 4,
+          "spacesynth": 3,
+          "hypertechno": 3,
+          "psychploitation": 3,
+          "polifonia occitana": 4
+        }
+      },
+      {
+        "name": "Markus Kuchenbuch",
+        "mb_tagged": false,
+        "tags": {
+          "baila": 3,
+          "upopo": 3,
+          "worldbeat": 2,
+          "xian psych": 3,
+          "bongo flava": 3,
+          "sampledelia": 4,
+          "world fusion": 2,
+          "cante alentejano": 2,
+          "gamelan surakarta": 3,
+          "vietnamese bolero": 2
+        }
+      },
+      {
+        "name": "DJ MIXI4",
+        "mb_tagged": false,
+        "tags": {
+          "ond\u014d": 4,
+          "britpop": 3,
+          "emocore": 4,
+          "new rave": 3,
+          "xtra raw": 3,
+          "impromptu": 4,
+          "chillsynth": 4,
+          "spacesynth": 4,
+          "synth funk": 4,
+          "fm synthesis": 4
+        }
+      },
+      {
+        "name": "club pute",
+        "mb_tagged": false,
+        "tags": {
+          "fungi": 3,
+          "parang": 3,
+          "embolada": 4,
+          "uk drill": 3,
+          "psybreaks": 3,
+          "ghetto funk": 3,
+          "black ambient": 3,
+          "psychploitation": 2,
+          "funk ostenta\u00e7\u00e3o": 3,
+          "downtempo deathcore": 3
+        }
+      },
+      {
+        "name": "Goldfader",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 2,
+          "uk drill": 2,
+          "ghettotech": 3,
+          "acid breaks": 2,
+          "euro-trance": 2,
+          "hypertechno": 2,
+          "techno bass": 3,
+          "technobanda": 2,
+          "techno kay\u014d": 3,
+          "detroit techno": 3
+        }
+      },
+      {
+        "name": "DAX>TV",
+        "mb_tagged": false,
+        "tags": {
+          "edm": 3,
+          "britpop": 3,
+          "dubstyle": 3,
+          "impromptu": 3,
+          "spacesynth": 3,
+          "mod revival": 3,
+          "electro-funk": 3,
+          "fm synthesis": 3,
+          "electronicore": 3,
+          "hi-tech full-on": 3
+        }
+      },
+      {
+        "name": "Bojan Landekic",
+        "mb_tagged": false,
+        "tags": {
+          "piphat": 4,
+          "kalattut": 3,
+          "spacesynth": 4,
+          "synth funk": 3,
+          "hypertechno": 4,
+          "electro-funk": 4,
+          "fm synthesis": 4,
+          "expressionism": 3,
+          "space age pop": 4,
+          "hi-tech full-on": 4
+        }
+      },
+      {
+        "name": "daku",
+        "mb_tagged": false,
+        "tags": {
+          "artcore": 1,
+          "dreampunk": 1,
+          "sound art": 1,
+          "ambient dub": 1,
+          "heaven trap": 2,
+          "ambient plugg": 2,
+          "ritual ambient": 1,
+          "audio documentary": 1,
+          "sinfonia concertante": 1
+        }
+      },
+      {
+        "name": "Treesleeper",
+        "mb_tagged": false,
+        "tags": {
+          "pumpcore": 3,
+          "technoid": 3,
+          "xtra raw": 3,
+          "ghettotech": 4,
+          "hypertechno": 3,
+          "technobanda": 3,
+          "fm synthesis": 3,
+          "techno kay\u014d": 4,
+          "detroit techno": 4,
+          "peak time techno": 3
+        }
+      },
+      {
+        "name": "Horrible Thing(s)",
+        "mb_tagged": false,
+        "tags": {
+          "parang": 2,
+          "synth funk": 2,
+          "comfy synth": 2,
+          "fm synthesis": 2,
+          "kadongo kamu": 2,
+          "donosti sound": 2,
+          "liquid riddim": 2,
+          "g\u00e9nero grande": 2,
+          "audio documentary": 2,
+          "polifonia occitana": 2
+        }
+      },
+      {
+        "name": "Kreativ Data Arkiv",
+        "mb_tagged": false,
+        "tags": {
+          "makina": 2,
+          "hi-tech": 2,
+          "hypertechno": 4,
+          "techno kay\u014d": 2,
+          "impressionism": 3,
+          "liquid riddim": 2,
+          "psychploitation": 2,
+          "audio documentary": 2,
+          "minneapolis sound": 2,
+          "electro-industrial": 2
+        }
+      },
+      {
+        "name": "czjstmax",
+        "mb_tagged": false,
+        "tags": {
+          "pumpcore": 4,
+          "trikitixa": 4,
+          "hypertechno": 4,
+          "isicathamiya": 3,
+          "techno kay\u014d": 3,
+          "footwork jungle": 4,
+          "graphical sound": 4,
+          "psychploitation": 3,
+          "forr\u00f3 eletr\u00f4nico": 4,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "Geoff Leigh",
+        "mb_tagged": false,
+        "tags": {
+          "filmi": 2,
+          "adhunik geet": 2,
+          "burmese mono": 2,
+          "concert band": 2,
+          "jersey sound": 2,
+          "jungle terror": 2,
+          "broadband noise": 3,
+          "concertina band": 3,
+          "orchestral jazz": 3,
+          "free improvisation": 3
+        }
+      },
+      {
+        "name": "Dgs40",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 3,
+          "ghettotech": 2,
+          "hypertechno": 3,
+          "techno bass": 2,
+          "technobanda": 3,
+          "techno kay\u014d": 3,
+          "wonky techno": 2,
+          "electronicore": 2,
+          "detroit techno": 3,
+          "peak time techno": 3
+        }
+      },
+      {
+        "name": "d0ll",
+        "mb_tagged": false,
+        "tags": {
+          "bandinha": 1,
+          "concerto": 1,
+          "old-time": 1,
+          "post-bop": 2,
+          "burmese mono": 1,
+          "concert band": 3,
+          "concertina band": 1,
+          "old roman chant": 2
+        }
+      },
+      {
+        "name": "glinted records",
+        "mb_tagged": false,
+        "tags": {
+          "ambient dub": 3,
+          "hypertechno": 3,
+          "impressionism": 3,
+          "liquid riddim": 3,
+          "ritual ambient": 3,
+          "psychploitation": 4,
+          "audio documentary": 4,
+          "minneapolis sound": 4,
+          "polifonia occitana": 4,
+          "sinfonia concertante": 3
+        }
+      },
+      {
+        "name": "all my thoughts",
+        "mb_tagged": false,
+        "tags": {
+          "break-in": 2,
+          "hyperpop": 3,
+          "breakcore": 1,
+          "breakstep": 2,
+          "rawphoric": 1,
+          "funk de bh": 2,
+          "livetronica": 1,
+          "electro-funk": 2,
+          "post-dubstep": 2,
+          "electronicore": 1
+        }
+      },
+      {
+        "name": "GoH Recordings",
+        "mb_tagged": false,
+        "tags": {
+          "fungi": 2,
+          "sound art": 2,
+          "horrorcore": 2,
+          "ambient plugg": 2,
+          "donosti sound": 2,
+          "impressionism": 2,
+          "ritual ambient": 2,
+          "funk ostenta\u00e7\u00e3o": 2,
+          "ambient noise wall": 3,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "ShyMan",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 2,
+          "diva house": 2,
+          "euro house": 2,
+          "funk de bh": 2,
+          "ghettotech": 3,
+          "speed house": 3,
+          "garage house": 2,
+          "ghetto house": 2,
+          "detroit techno": 2,
+          "peak time techno": 3
+        }
+      },
+      {
+        "name": "Polygon Network",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 3,
+          "ghettotech": 3,
+          "acid techno": 3,
+          "techno bass": 3,
+          "technobanda": 3,
+          "ghetto house": 3,
+          "techno kay\u014d": 3,
+          "wonky techno": 3,
+          "detroit techno": 3,
+          "peak time techno": 3
+        }
+      },
+      {
+        "name": "MusicForTheSea",
+        "mb_tagged": false,
+        "tags": {
+          "danmono": 1,
+          "dreampunk": 2,
+          "sound art": 2,
+          "ambient dub": 2,
+          "heaven trap": 2,
+          "ambient plugg": 2,
+          "impressionism": 3,
+          "ritual ambient": 2,
+          "minneapolis sound": 2,
+          "sinfonia concertante": 3
+        }
+      },
+      {
+        "name": "Neovant",
+        "mb_tagged": false,
+        "tags": {
+          "3-step": 2,
+          "dubstep": 2,
+          "dubstyle": 3,
+          "hardwave": 2,
+          "spamwave": 2,
+          "cyberpunk": 4,
+          "modern hardtek": 2,
+          "riddim dubstep": 2,
+          "digital hardcore": 2,
+          "power electronics": 3
+        }
+      },
+      {
+        "name": "OBJECT AS SUBJECT",
+        "mb_tagged": false,
+        "tags": {
+          "apala": 4,
+          "vanera": 3,
+          "mappila": 3,
+          "embolada": 6,
+          "pumpcore": 3,
+          "stoner rap": 4,
+          "donosti sound": 3,
+          "burmese stereo": 3,
+          "funk ostenta\u00e7\u00e3o": 3,
+          "nh\u1ea1c ti\u1ec1n chi\u1ebfn": 3
+        }
+      },
+      {
+        "name": "Destillation",
+        "mb_tagged": false,
+        "tags": {
+          "noh": 3,
+          "fungi": 4,
+          "gumbe": 3,
+          "parang": 4,
+          "acidcore": 3,
+          "kilapanga": 3,
+          "psybreaks": 3,
+          "ng\u00e2m th\u01a1": 4,
+          "donosti sound": 3,
+          "funk ostenta\u00e7\u00e3o": 3
+        }
+      },
+      {
+        "name": "Ali Choolaei",
+        "mb_tagged": false,
+        "tags": {
+          "gwo ka": 2,
+          "taarab": 2,
+          "screamo": 2,
+          "bhavageethe": 2,
+          "khrueang sai": 2,
+          "anglican chant": 3,
+          "m\u00fasica criolla": 2,
+          "tonada asturiana": 2,
+          "zarzuela barroca": 2,
+          "muzika yehudit mekorit": 2
+        }
+      },
+      {
+        "name": "5ting5ama",
+        "mb_tagged": false,
+        "tags": {
+          "ond\u014d": 6,
+          "d-beat": 6,
+          "nasheed": 7,
+          "hyperpop": 6,
+          "illbient": 6,
+          "impromptu": 6,
+          "yue opera": 6,
+          "pornogrind": 6,
+          "rautalanka": 5,
+          "dikir barat": 6
+        }
+      },
+      {
+        "name": "king willus",
+        "mb_tagged": false,
+        "tags": {
+          "lo-fi": 2,
+          "ond\u014d": 2,
+          "lowend": 2,
+          "danmono": 2,
+          "hard nrg": 1,
+          "pornogrind": 2,
+          "dikir barat": 2,
+          "lo-fi house": 2,
+          "lo-fi hip hop": 2,
+          "g\u00e9nero grande": 1
+        }
+      },
+      {
+        "name": "The Sickness Report",
+        "mb_tagged": false,
+        "tags": {
+          "hyperpop": 3,
+          "pumpcore": 3,
+          "ghettotech": 3,
+          "ng\u00e2m th\u01a1": 3,
+          "spacesynth": 3,
+          "hypertechno": 3,
+          "fm synthesis": 3,
+          "techno kay\u014d": 2,
+          "detroit techno": 3,
+          "peak time techno": 3
+        }
+      },
+      {
+        "name": "Acaphe",
+        "mb_tagged": false,
+        "tags": {
+          "makina": 2,
+          "art song": 2,
+          "spacesynth": 2,
+          "synth funk": 2,
+          "comfy synth": 3,
+          "hypertechno": 3,
+          "winter synth": 2,
+          "electronicore": 2,
+          "impressionism": 3,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "deep:hus",
+        "mb_tagged": false,
+        "tags": {
+          "afro house": 3,
+          "diva house": 3,
+          "tech house": 4,
+          "italo house": 3,
+          "garage house": 3,
+          "jackin house": 3,
+          "ambient house": 3,
+          "ballroom house": 3,
+          "bubbling house": 4,
+          "festival progressive house": 4
+        }
+      },
+      {
+        "name": "Pump",
+        "mb_tagged": false,
+        "tags": {
+          "pumpcore": 2,
+          "afro trap": 2,
+          "funk de bh": 1,
+          "dikir barat": 1
+        }
+      },
+      {
+        "name": "daskaran",
+        "mb_tagged": false,
+        "tags": {
+          "edm": 2,
+          "pumpcore": 3,
+          "technoid": 2,
+          "rawphoric": 2,
+          "speedcore": 2,
+          "funk de bh": 3,
+          "fm synthesis": 2,
+          "speed garage": 2,
+          "detroit techno": 2,
+          "peak time techno": 2
+        }
+      },
+      {
+        "name": "Moncala",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 3,
+          "ghettotech": 3,
+          "ng\u00e2m th\u01a1": 3,
+          "son montuno": 4,
+          "techno bass": 3,
+          "technobanda": 3,
+          "ghetto house": 4,
+          "techno kay\u014d": 3,
+          "wonky techno": 3,
+          "detroit techno": 3
+        }
+      },
+      {
+        "name": "Chiguiro Records",
+        "mb_tagged": false,
+        "tags": {
+          "edm": 2,
+          "trap edm": 1,
+          "diva house": 1,
+          "euro house": 2,
+          "funk de bh": 1,
+          "ghettotech": 2,
+          "speed house": 3,
+          "garage house": 1,
+          "jackin house": 1,
+          "peak time techno": 2
+        }
+      },
+      {
+        "name": "Hermes Acosta HA",
+        "mb_tagged": false,
+        "tags": {
+          "filin": 1,
+          "2-step": 2,
+          "britpop": 2,
+          "danmono": 3,
+          "emocore": 2,
+          "omutibo": 2,
+          "fandango": 2,
+          "afropiano": 1,
+          "barbershop": 2,
+          "son montuno": 2
+        }
+      },
+      {
+        "name": "A Sullen Way",
+        "mb_tagged": false,
+        "tags": {
+          "kafi": 2,
+          "hyperpop": 2,
+          "minatory": 1,
+          "pumpcore": 2,
+          "uk drill": 2,
+          "funk de bh": 2,
+          "detroit trap": 1,
+          "kadongo kamu": 1,
+          "liquid riddim": 2
+        }
+      },
+      {
+        "name": "ripxamina",
+        "mb_tagged": false,
+        "tags": {
+          "ond\u014d": 3,
+          "cururu": 2,
+          "britpop": 2,
+          "hyperpop": 3,
+          "yue opera": 3,
+          "pornogrind": 4,
+          "spacesynth": 2,
+          "dikir barat": 3,
+          "fm synthesis": 2,
+          "g\u00e9nero grande": 2
+        }
+      },
+      {
+        "name": "Default Standard",
+        "mb_tagged": false,
+        "tags": {
+          "makina": 2,
+          "parang": 2,
+          "art punk": 2,
+          "sound art": 2,
+          "comfy synth": 2,
+          "black ambient": 2,
+          "impressionism": 2,
+          "liquid riddim": 2,
+          "funk ostenta\u00e7\u00e3o": 2,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "Yunoccha",
+        "mb_tagged": false,
+        "tags": {
+          "b\u00e9l\u00e9": 2,
+          "zydeco": 2,
+          "artcore": 3,
+          "danmono": 2,
+          "mor lam": 2,
+          "dreampunk": 2,
+          "heaven trap": 3,
+          "ritual ambient": 2,
+          "minneapolis sound": 2,
+          "sinfonia concertante": 3
+        }
+      },
+      {
+        "name": "ayaboa",
+        "mb_tagged": false,
+        "tags": {
+          "baila": 3,
+          "taarab": 3,
+          "guajira": 3,
+          "minatory": 3,
+          "post-rock": 4,
+          "bhavageethe": 3,
+          "festival trap": 4,
+          "footwork jungle": 3,
+          "minneapolis sound": 4,
+          "forr\u00f3 universit\u00e1rio": 4
+        }
+      },
+      {
+        "name": "Falcifera",
+        "mb_tagged": false,
+        "tags": {
+          "kafi": 2,
+          "danmono": 3,
+          "funan\u00e1": 2,
+          "omutibo": 3,
+          "acidcore": 2,
+          "algorave": 2,
+          "\u010dalgija": 2,
+          "anti-folk": 3,
+          "post-britpop": 2,
+          "post-hardcore": 3
+        }
+      },
+      {
+        "name": "toon van kouteren",
+        "mb_tagged": false,
+        "tags": {
+          "parang": 2,
+          "uk drill": 3,
+          "darksynth": 3,
+          "deathcore": 2,
+          "psybreaks": 2,
+          "comfy synth": 2,
+          "ghetto funk": 2,
+          "liquid riddim": 2,
+          "funk ostenta\u00e7\u00e3o": 2,
+          "polifonia occitana": 2
+        }
+      },
+      {
+        "name": "Ke1ty",
+        "mb_tagged": false,
+        "tags": {
+          "edm": 3,
+          "j-pop": 3,
+          "k-pop": 2,
+          "q-pop": 3,
+          "piphat": 3,
+          "art pop": 3,
+          "spacesynth": 3,
+          "synth funk": 2,
+          "fm synthesis": 3,
+          "hi-tech full-on": 3
+        }
+      },
+      {
+        "name": "Survivors Guide",
+        "mb_tagged": false,
+        "tags": {
+          "drill": 2,
+          "makina": 3,
+          "hyperpop": 3,
+          "ghettotech": 2,
+          "hypertechno": 4,
+          "impressionism": 3,
+          "audio documentary": 3,
+          "minneapolis sound": 2,
+          "polifonia occitana": 2,
+          "sinfonia concertante": 2
+        }
+      },
+      {
+        "name": "SHWANNOMA",
+        "mb_tagged": false,
+        "tags": {
+          "deathrock": 2,
+          "deathstep": 4,
+          "frat rock": 3,
+          "grindcore": 2,
+          "hard trap": 3,
+          "deathgrind": 3,
+          "brutal prog": 4,
+          "horror punk": 2,
+          "death industrial": 2,
+          "dissonant black metal": 2
+        }
+      },
+      {
+        "name": "DSCNDNTE",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 3,
+          "ng\u00e2m th\u01a1": 2,
+          "trance 2.0": 2,
+          "acid techno": 2,
+          "hard techno": 3,
+          "technobanda": 3,
+          "darkcore edm": 2,
+          "techno kay\u014d": 3,
+          "wonky techno": 2,
+          "detroit techno": 3
+        }
+      },
+      {
+        "name": "Radio Bremen",
+        "mb_tagged": false,
+        "tags": {
+          "makina": 4,
+          "parang": 3,
+          "spacesynth": 4,
+          "synth funk": 3,
+          "comfy synth": 4,
+          "hypertechno": 4,
+          "black ambient": 3,
+          "impressionism": 3,
+          "funk automotivo": 3,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "Clubbing Traxx",
+        "mb_tagged": false,
+        "tags": {
+          "mbube": 3,
+          "hi-nrg": 4,
+          "piphat": 4,
+          "dance-punk": 4,
+          "euro-disco": 4,
+          "avant-garde": 3,
+          "italo-disco": 3,
+          "mod revival": 4,
+          "turntablism": 4,
+          "electro-funk": 3
+        }
+      },
+      {
+        "name": "OutSpiral",
+        "mb_tagged": false,
+        "tags": {
+          "vanera": 2,
+          "minatory": 2,
+          "post-rock": 2,
+          "deathgrind": 2,
+          "duranguense": 2,
+          "kadongo kamu": 3,
+          "donosti sound": 2,
+          "liquid riddim": 3,
+          "funk ostenta\u00e7\u00e3o": 3,
+          "tembang cianjuran": 3
+        }
+      },
+      {
+        "name": "goblin",
+        "mb_tagged": false,
+        "tags": {
+          "fungi": 4,
+          "genge": 3,
+          "parang": 4,
+          "embolada": 6,
+          "uk drill": 4,
+          "\u010dalgija": 5,
+          "kadongo kamu": 3,
+          "donosti sound": 4,
+          "psychploitation": 3,
+          "funk ostenta\u00e7\u00e3o": 3
+        }
+      },
+      {
+        "name": "zinky",
+        "mb_tagged": false,
+        "tags": {
+          "acidcore": 3,
+          "chillsynth": 3,
+          "ng\u00e2m th\u01a1": 3,
+          "spacesynth": 4,
+          "synth funk": 4,
+          "comfy synth": 3,
+          "son montuno": 4,
+          "electronicore": 3,
+          "new york drill": 3,
+          "psychploitation": 3
+        }
+      },
+      {
+        "name": "Djs-FQC-Records.",
+        "mb_tagged": false,
+        "tags": {
+          "city pop": 4,
+          "teen pop": 2,
+          "dance-pop": 2,
+          "dance-punk": 3,
+          "euro-disco": 3,
+          "pop ghazal": 3,
+          "italo-disco": 4,
+          "mod revival": 2,
+          "pop yeh-yeh": 3,
+          "tsonga disco": 3
+        }
+      },
+      {
+        "name": "Nahito Ohta",
+        "mb_tagged": false,
+        "tags": {
+          "d-beat": 3,
+          "hyperpop": 4,
+          "kalattut": 4,
+          "pornogrind": 4,
+          "hypertechno": 4,
+          "electronicore": 3,
+          "post-hardcore": 3,
+          "hi-tech full-on": 3,
+          "audio documentary": 6,
+          "minneapolis sound": 4
+        }
+      },
+      {
+        "name": "Dreamality",
+        "mb_tagged": false,
+        "tags": {
+          "parang": 3,
+          "minatory": 3,
+          "hypertechno": 2,
+          "impressionism": 3,
+          "liquid riddim": 2,
+          "psychploitation": 3,
+          "audio documentary": 3,
+          "funk ostenta\u00e7\u00e3o": 3,
+          "minneapolis sound": 3,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "Morning Sounds",
+        "mb_tagged": false,
+        "tags": {
+          "noh": 3,
+          "fungi": 2,
+          "genge": 3,
+          "sound art": 3,
+          "rain sounds": 3,
+          "white voice": 3,
+          "donosti sound": 3,
+          "houston sound": 3,
+          "jungle terror": 3,
+          "polifonia occitana": 3
+        }
+      },
+      {
+        "name": "Hidden Harmony Recordings",
+        "mb_tagged": false,
+        "tags": {
+          "zydeco": 2,
+          "danmono": 3,
+          "kalattut": 2,
+          "anti-folk": 2,
+          "dreampunk": 2,
+          "ambient dub": 3,
+          "ritual ambient": 2,
+          "audio documentary": 2,
+          "minneapolis sound": 3,
+          "sinfonia concertante": 2
+        }
+      },
+      {
+        "name": "\u0422\u0440\u0451\u0445\u043b\u0438\u0446\u0430\u044f \u043a\u0443\u043a\u043b\u0430",
+        "mb_tagged": false,
+        "tags": {
+          "fungi": 2,
+          "parang": 2,
+          "uk drill": 2,
+          "darksynth": 3,
+          "deathcore": 2,
+          "horrorcore": 2,
+          "dark garage": 2,
+          "donosti sound": 2,
+          "funk ostenta\u00e7\u00e3o": 2,
+          "polifonia occitana": 2
+        }
+      },
+      {
+        "name": "Amsys Records",
+        "mb_tagged": false,
+        "tags": {
+          "pumpcore": 3,
+          "technoid": 3,
+          "ng\u00e2m th\u01a1": 3,
+          "hard techno": 3,
+          "techno bass": 3,
+          "technobanda": 3,
+          "techno kay\u014d": 3,
+          "detroit techno": 3,
+          "peak time techno": 3,
+          "hardgroove techno": 4
+        }
+      },
+      {
+        "name": "Giacomo Baldelli",
+        "mb_tagged": false,
+        "tags": {
+          "falak": 4,
+          "tread": 8,
+          "zydeco": 3,
+          "art punk": 2,
+          "anti-folk": 4,
+          "black ambient": 3,
+          "donosti sound": 4,
+          "liquid riddim": 3,
+          "funk ostenta\u00e7\u00e3o": 3,
+          "tembang cianjuran": 3
+        }
+      },
+      {
+        "name": "jimmysucks",
+        "mb_tagged": false,
+        "tags": {
+          "drill": 4,
+          "makina": 4,
+          "parang": 4,
+          "mathcore": 4,
+          "yue opera": 4,
+          "hypertechno": 5,
+          "post-hardcore": 4,
+          "audio documentary": 5,
+          "minneapolis sound": 4,
+          "polifonia occitana": 4
+        }
+      },
+      {
+        "name": "LAROOM TRAX",
+        "mb_tagged": false,
+        "tags": {
+          "rawphoric": 2,
+          "diva house": 3,
+          "euro house": 3,
+          "ghettotech": 3,
+          "speed house": 3,
+          "garage house": 3,
+          "ghetto house": 3,
+          "jackin house": 3,
+          "ballroom house": 3,
+          "peak time techno": 3
+        }
+      },
+      {
+        "name": "SEEKTH",
+        "mb_tagged": false,
+        "tags": {
+          "makina": 2,
+          "ambient dub": 3,
+          "hypertechno": 2,
+          "kadongo kamu": 2,
+          "liquid riddim": 3,
+          "audio documentary": 4,
+          "funk ostenta\u00e7\u00e3o": 2,
+          "minneapolis sound": 3,
+          "polifonia occitana": 2,
+          "sinfonia concertante": 2
+        }
+      },
+      {
+        "name": "AtrusProfanum",
+        "mb_tagged": false,
+        "tags": {
+          "filin": 1,
+          "poetry": 1,
+          "new age": 2,
+          "black noise": 1,
+          "vedic chant": 1,
+          "new romantic": 1,
+          "sound poetry": 1,
+          "winter synth": 2,
+          "minimal synth": 1
+        }
+      },
+      {
+        "name": "Logistic records / Telegraph records",
+        "mb_tagged": false,
+        "tags": {
+          "technoid": 3,
+          "diva house": 2,
+          "euro house": 3,
+          "ghettotech": 2,
+          "speed house": 3,
+          "technobanda": 3,
+          "garage house": 3,
+          "ghetto house": 3,
+          "wonky techno": 3,
+          "peak time techno": 3
+        }
+      },
+      {
+        "name": "SineTone",
+        "mb_tagged": false,
+        "tags": {
+          "gumbe": 2,
+          "acidcore": 2,
+          "darksynth": 3,
+          "industrial": 3,
+          "progressive": 3,
+          "psychedelic": 2,
+          "experimental": 2,
+          "industrial musical": 2,
+          "progressive electronic": 2,
+          "experimental electronic": 2
+        }
+      },
+      {
+        "name": "CHARLIE SMILER",
+        "mb_tagged": false,
+        "tags": {
+          "tread": 5,
+          "bitpop": 2,
+          "breaks": 3,
+          "ripsaw": 5,
+          "audio drama": 3,
+          "prank calls": 3,
+          "group sounds": 3,
+          "florida breaks": 2,
+          "nu skool breaks": 2,
+          "bakersfield sound": 2
+        }
+      },
+      {
+        "name": "X.P UNIVERSE",
+        "mb_tagged": false,
+        "tags": {
+          "twerk": 3,
+          "acidcore": 3,
+          "electronic": 3,
+          "synth funk": 3,
+          "electronica": 3,
+          "psychedelic": 3,
+          "experimental": 3,
+          "c\u1ea3i l\u01b0\u01a1ng": 3,
+          "tearout brostep": 3,
+          "experimental electronic": 4
+        }
+      }
+    ]
+  }
+}
