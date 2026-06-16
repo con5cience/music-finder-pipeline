@@ -558,3 +558,72 @@ def test_prune_matches_provisional_by_id_when_mbid_null(conn):
     conn.execute("UPDATE artist SET embedding_source = NULL WHERE id = %s", (a,))
     publish_incremental(conn, conn)
     assert conn.execute("SELECT count(*) FROM artists WHERE name='Provisional Reset'").fetchone()[0] == 0
+
+
+def test_mb_genres_batch_editorial_genres(conn):
+    """MB editorial genres: direct genre kept, alias merged to canonical,
+    non-genre tag dropped, votes summed, all from mb_raw."""
+    from pipeline.publish import mb_genres_batch
+    conn.execute(
+        "INSERT INTO mb_raw.genre (id, gid, name) VALUES "
+        "(970001,'00000000-feed-4bad-9bad-00000000e001','zz-metal'),"
+        "(970002,'00000000-feed-4bad-9bad-00000000e002','zz-wave')"
+    )
+    conn.execute(
+        "INSERT INTO mb_raw.genre_alias (id, genre, name, sort_name) VALUES "
+        "(970101, 970002, 'zz wave', 'zz wave')"
+    )
+    conn.execute(
+        "INSERT INTO mb_raw.tag (id, name, ref_count) VALUES "
+        "(980001,'zz-metal',1),(980002,'zz wave',1),(980003,'canadian',1)"
+    )
+    mbid = '00000000-feed-4bad-9bad-00000000a701'
+    conn.execute(
+        "INSERT INTO mb_raw.artist (id, gid, name, sort_name) VALUES (990701, %s, 'MBG', 'MBG')",
+        (mbid,),
+    )
+    conn.execute(
+        "INSERT INTO mb_raw.artist_tag (artist, tag, count) VALUES "
+        "(990701,980001,5),(990701,980002,3),(990701,980003,9)"
+    )
+    a = conn.execute(
+        "INSERT INTO artist (display_name, mbid) VALUES ('MBG', %s) RETURNING id", (mbid,)
+    ).fetchone()[0]
+    tags = mb_genres_batch(conn, [a]).get(str(a), {})
+    assert 'zz-metal' in tags          # direct canonical genre
+    assert 'zz-wave' in tags           # alias 'zz wave' merged to canonical
+    assert 'canadian' not in tags      # non-genre dropped despite high vote count
+
+
+def test_publish_prefers_mb_genres_over_audio(conn):
+    """MB genres win when present; audio tags only fill in where MB has none."""
+    from pipeline.publish import publish_rows, publishable_artists
+    _serving_schema(conn)
+    conn.execute(
+        "INSERT INTO mb_raw.genre (id, gid, name) VALUES "
+        "(971001,'00000000-feed-4bad-9bad-00000000e101','zz-mbgenre')"
+    )
+    conn.execute("INSERT INTO mb_raw.tag (id, name, ref_count) VALUES (981001,'zz-mbgenre',1)")
+    mbid = '00000000-feed-4bad-9bad-00000000a801'
+    conn.execute(
+        "INSERT INTO mb_raw.artist (id, gid, name, sort_name) VALUES (991001, %s, 'HasMB', 'HasMB')",
+        (mbid,),
+    )
+    conn.execute("INSERT INTO mb_raw.artist_tag (artist, tag, count) VALUES (991001,981001,4)")
+    a = conn.execute(
+        "INSERT INTO artist (display_name, mbid, embedding_source) VALUES ('HasMB', %s, 'bandcamp') RETURNING id",
+        (mbid,),
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
+        "VALUES (%s,'mock-model',2,'[0.6,0.8]',4,0.67)", (a,),
+    )
+    # an audio tag that should be SUPPRESSED in favor of the MB genre
+    conn.execute(
+        "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES (%s,'zz-audiotag',0.9,'muq-mulan-large')",
+        (a,),
+    )
+    publish_rows(conn, conn, publishable_artists(conn, 10))
+    # MB-keyed artists get a fresh serving id (ON CONFLICT mbid) — query by mbid
+    tags = conn.execute("SELECT tags FROM artists WHERE mbid=%s", (mbid,)).fetchone()[0]
+    assert 'zz-mbgenre' in tags and 'zz-audiotag' not in tags

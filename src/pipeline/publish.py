@@ -598,6 +598,38 @@ def _artist_tags_centered(conn: Connection, aids: list, g_moments, c: float | No
     return out
 
 
+def mb_genres_batch(conn: Connection, aids: list) -> dict[str, dict]:
+    """MusicBrainz EDITORIAL genres per artist — accurate by construction (the
+    primary tag source; audio tags are only the fallback where MB has none).
+    MB tags are filtered to the canonical genre vocab (drops non-genres like
+    'canadian'/'seen live') and alias-merged ('synth-pop'->'synthpop'), with
+    editorial vote counts summed across spellings; capped at TAG_K by count.
+    Empty for artists MB has no genres for (~78%, the underground)."""
+    out: dict[str, dict] = {}
+    for aid, genre, cnt in conn.execute(
+        """
+        SELECT a.id::text AS aid, coalesce(gc.name, gd.name) AS genre, at.count AS cnt
+        FROM artist a
+        JOIN mb_raw.artist mra ON mra.gid::text = a.mbid::text
+        JOIN mb_raw.artist_tag at ON at.artist = mra.id AND at.count > 0
+        JOIN mb_raw.tag t ON t.id = at.tag
+        LEFT JOIN mb_raw.genre gd ON gd.name = lower(t.name)
+        LEFT JOIN mb_raw.genre_alias gal ON gal.name = lower(t.name)
+        LEFT JOIN mb_raw.genre gc ON gc.id = gal.genre
+        WHERE a.id = ANY(%s::uuid[]) AND a.mbid IS NOT NULL
+          AND (gd.name IS NOT NULL OR gc.name IS NOT NULL)
+        """,
+        ([str(a) for a in aids],),
+    ).fetchall():
+        d = out.setdefault(aid, {})
+        d[genre] = d.get(genre, 0) + int(cnt)  # sum votes across spellings
+    capped: dict[str, dict] = {}
+    for aid, gd in out.items():
+        top = sorted(gd.items(), key=lambda kv: -kv[1])[:TAG_K]
+        capped[aid] = {g: max(1, c) for g, c in top}
+    return capped
+
+
 def publish_artists(factory: Connection, app: Connection, limit: int = 1000, since=None) -> int:
     """Upsert embedded artists into the serving DB. Returns artists published."""
     return publish_rows(factory, app, publishable_artists(factory, limit, since))
@@ -616,7 +648,10 @@ def publish_rows(factory: Connection, app: Connection, rows: list[tuple]) -> int
     # set-based reads: one query each for the whole batch, not 5 per artist.
     aids = [r[0] for r in rows]
     urls_by = artist_urls_batch(factory, aids)
-    tags_by = artist_tags_batch(factory, aids, g_artist)  # centers when tag_centering present
+    # Tags: MusicBrainz editorial genres when present (accurate), else audio tags.
+    mb_by = mb_genres_batch(factory, aids)
+    audio_by = artist_tags_batch(factory, aids, g_artist)
+    tags_by = {str(a): (mb_by.get(str(a)) or audio_by.get(str(a), {})) for a in aids}
     perc_by = artist_perceptual_batch(factory, aids)
     lang_by = artist_language_batch(factory, aids)
     loc_by = artist_location_batch(factory, aids)
