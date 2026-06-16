@@ -35,6 +35,7 @@ from pipeline.embed_job import (
     _embedded_track_count,
     _fetch_with_refresh,
     _select_for_source,
+    _try_archive,
     _vec_text,
     fetch_audio,
     pending_tracks,
@@ -117,6 +118,9 @@ def prep_artist(
         except Exception:  # noqa: BLE001 — flag-only feature, prep must not fail on it
             pass
         segs = _clips_for_track(mono, sr, path, platform, duration_s, adir, str(tid))
+        # ADR-021 Tier B: keep the compressed source clip before this stage dir is
+        # GC'd post-embed, so a model swap / windowing change re-analyzes locally.
+        _try_archive(conn, str(artist_id), str(tid), platform, str(path))
         manifest.append({
             "track_id": str(tid),
             "platform": platform,

@@ -13,6 +13,9 @@ descriptor in queues.py.
 from __future__ import annotations
 
 import hashlib
+import logging
+import os
+import shutil
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -23,6 +26,8 @@ from psycopg import Connection
 from pipeline.bench.types import Clip, Embedder
 from pipeline.queues import REFRESHERS, WINDOWED_PLATFORMS
 from pipeline.windows import peak_windows
+
+log = logging.getLogger(__name__)
 
 _DEFAULT_SEGMENT_S = 30
 WINDOWS_PER_TRACK = 4   # 3 tracks x 4 windows ≈ the 10-12 Deezer-preview budget
@@ -166,6 +171,50 @@ def fetch_audio(url: str, workdir: Path) -> str:
 
 def _vec_text(vector: list[float]) -> str:
     return "[" + ",".join(repr(float(x)) for x in vector) + "]"
+
+
+def archive_root() -> Path:
+    return Path(os.environ.get("PIPELINE_ARCHIVE_DIR", "/archive"))
+
+
+def archive_source_clip(
+    conn: Connection, artist_id: str, track_id: str, platform: str, src_path: str
+) -> None:
+    """ADR-021 Tier B: keep the COMPRESSED fetched source clip (not the decoded
+    PCM, not a re-fetchable URL) on the archive volume + record it in
+    audio_clip_archive, so a future embedding-model swap or windowing change
+    decodes locally instead of re-fetching through the acquisition pipeline.
+    Idempotent per track. Wrapped by _try_archive in a savepoint — archiving is
+    strictly best-effort and must never abort the (far more valuable) embed."""
+    src = Path(src_path)
+    size = src.stat().st_size
+    if size <= 1024:  # truncated/empty clip — nothing worth keeping
+        return
+    rel = f"{artist_id}/{track_id}{src.suffix or '.bin'}"
+    dst = archive_root() / rel
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    conn.execute(
+        "INSERT INTO audio_clip_archive (track_id, artist_id, platform, rel_path, bytes) "
+        "VALUES (%s, %s, %s, %s, %s) "
+        "ON CONFLICT (track_id) DO UPDATE SET "
+        "artist_id = EXCLUDED.artist_id, platform = EXCLUDED.platform, "
+        "rel_path = EXCLUDED.rel_path, bytes = EXCLUDED.bytes, archived_at = now()",
+        (track_id, artist_id, platform, rel, size),
+    )
+
+
+def _try_archive(
+    conn: Connection, artist_id: str, track_id: str, platform: str, src_path: str
+) -> None:
+    """Savepoint-guarded archive: a failure (volume unmounted, bad path, table
+    missing pre-migration) rolls back ONLY the archive write and is logged — the
+    surrounding prep/embed transaction proceeds untouched."""
+    try:
+        with conn.transaction():
+            archive_source_clip(conn, artist_id, track_id, platform, src_path)
+    except Exception:
+        log.exception("source-clip archive failed for track %s", track_id)
 
 
 def refresh_artist_centroid(
@@ -364,6 +413,8 @@ def embed_artist_clips(
             segs = _clips_for_track(mono, native_sr, path, platform, duration_s, workdir, str(tid))
             for seg in segs:
                 usable.append((tid, *seg))
+            if segs:  # ADR-021 Tier B: keep the compressed source before workdir is GC'd
+                _try_archive(conn, artist_id, str(tid), platform, path)
             if heads:
                 from pipeline.heads import HeadContext, run_heads
 

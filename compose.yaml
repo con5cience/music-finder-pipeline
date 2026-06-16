@@ -120,9 +120,11 @@ services:
       PIPELINE_TEMPORAL_ADDRESS: temporal:7233
       PIPELINE_FETCH_CACHE_DIR: /cache/fetch-cache
       PIPELINE_STAGE_DIR: /stage
+      PIPELINE_ARCHIVE_DIR: /archive   # ADR-021 Tier B retained compressed clips
     volumes:
       - fetch-cache:/cache/fetch-cache
       - clip-stage:/stage
+      - audio-archive:/archive
     depends_on:
       - factory-db
       - temporal
@@ -142,6 +144,7 @@ services:
       PIPELINE_TEMPORAL_ADDRESS: temporal:7233
       PIPELINE_FETCH_CACHE_DIR: /cache/fetch-cache
       PIPELINE_STAGE_DIR: /stage
+      PIPELINE_ARCHIVE_DIR: /archive   # ADR-021 Tier B retained compressed clips
       HF_HOME: /hf
       PIPELINE_GPU_CONCURRENCY: "2"  # proven ceiling (13.1GB peak). conc-4
       # REQUIRES true fp16 (model.half()) — autocast BACKFIRED live (it
@@ -151,6 +154,7 @@ services:
     volumes:
       - fetch-cache:/cache/fetch-cache
       - clip-stage:/stage
+      - audio-archive:/archive
       - hf-cache:/hf
     deploy:
       resources:
@@ -246,3 +250,5 @@ volumes:
   fetch-cache:
   clip-stage:
   hf-cache:
+  audio-archive:   # ADR-021 Tier B: retained compressed source clips (~0.5-1TB
+                   # at full corpus; on /dev/sda2 w/ 1.4TB free — monitor + grow)
