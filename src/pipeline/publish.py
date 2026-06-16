@@ -29,6 +29,10 @@ TAG_K = 10
 # overlap — so we rely on the soft idf (ln(N/df)) ranking instead. Lower this
 # only to force-drop a specific pathological tag.
 MAGNET_RATE_CEILING = 1.0
+# ADR-020 P3: keep only tags whose idf-adjusted z is at least this fraction of the
+# artist's OWN best — stops force-padding a thin-signal artist to TAG_K slots with
+# demoted magnets (real-data sim: avg magnets/artist 1.35 -> 0.56, ~4 tags kept).
+TAG_REL_GATE = 0.5
 
 _URL_BUILDERS = {
     "deezer": lambda pid: f"https://www.deezer.com/artist/{pid}",
@@ -295,9 +299,17 @@ def artist_tags(conn: Connection, artist_id, g_moments=None) -> dict[str, int]:
         (gmean, gsd, n_corpus, n_corpus, ARTIST_SUFFIX, artist_id, MAGNET_RATE_CEILING, TAG_K),
     ).fetchall()
     if primary:
-        # Keep/order by z_adj (idf-demoted); weight from the plain z so tag_vector
-        # magnitudes stay in their normal range.
-        return {tag: max(1, round(float(z)) + 1) for tag, z, z_adj in primary if float(z_adj) > 0}
+        # Order/keep by z_adj (idf-demoted). P3 relative gate: keep only tags
+        # within TAG_REL_GATE of the artist's OWN best z_adj, so a thin-signal
+        # artist publishes its few real tags rather than TAG_K padded with demoted
+        # magnets. Weight from the plain z so tag_vector magnitudes stay normal.
+        top = max(float(za) for _t, _z, za in primary)
+        floor = TAG_REL_GATE * top
+        return {
+            tag: max(1, round(float(z)) + 1)
+            for tag, z, z_adj in primary
+            if float(z_adj) > 0 and float(z_adj) >= floor
+        }
     rows = conn.execute(
         """
         WITH g AS (SELECT avg(score) gmean, greatest(stddev(score), 1e-6) gsd

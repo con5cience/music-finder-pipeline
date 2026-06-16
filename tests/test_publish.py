@@ -148,9 +148,10 @@ def test_artist_tags_z_score_against_artist_moments_not_track(conn):
     assert "cal-units" not in artist_tags(conn, a)  # judged against the artist mean (0.80) → z<0
 
 
-def test_artist_tags_idf_demotes_higher_df_tag(conn):
-    """ADR-020 P2: with EQUAL raw z, the rarer tag (higher idf = ln(N/df)) ranks
-    above the more-assigned one — idf demotes magnets by corpus frequency."""
+def test_artist_tags_idf_and_gate_suppress_a_magnet(conn):
+    """ADR-020 P2+P3: with EQUAL raw z, the over-assigned tag (low idf=ln(N/df)) is
+    demoted AND falls below the per-artist relative gate → dropped, while the rare
+    well-matched tag is kept."""
     f = [
         conn.execute("INSERT INTO artist (display_name) VALUES (%s) RETURNING id", (f"idf-f{i}",)).fetchone()[0]
         for i in range(3)
@@ -177,8 +178,9 @@ def test_artist_tags_idf_demotes_higher_df_tag(conn):
         "('magnet-tag','muq-mulan-large#artist',0.45,0.10,3),"
         "('rare-tag','muq-mulan-large#artist',0.45,0.10,1)"
     )
-    keys = list(artist_tags(conn, a).keys())
-    assert keys[:2] == ["rare-tag", "magnet-tag"]  # idf orders the rarer tag first
+    tags = artist_tags(conn, a)
+    assert "rare-tag" in tags  # rare, well-matched → kept
+    assert "magnet-tag" not in tags  # demoted by idf, then gated out by P3
 
 
 def test_refresh_calibration_writes_both_track_and_artist_moments(conn):
