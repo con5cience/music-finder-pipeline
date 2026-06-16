@@ -14,10 +14,13 @@ Research-grade estimates, not ground truth; stored as signals, not verdicts.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 import numpy as np
 from psycopg import Connection
+
+log = logging.getLogger(__name__)
 
 PERCEPTUAL_MODEL = "muq-mulan-large"
 
@@ -194,7 +197,54 @@ def artist_tag_pass(conn: Connection, heads: list, artist_id: str, vecs_list: li
     from pipeline.tags import ARTIST_TAG_TOP_K, replace_artist_tags
 
     stacked = np.concatenate(vecs, axis=0)
+    # ADR-021 Tier A: stash the vectors before scoring. Best-effort — a savepoint
+    # keeps a persist failure from poisoning the (far more valuable) embed
+    # transaction; the embed proceeds even if the stash fails.
+    try:
+        with conn.transaction():
+            persist_analysis_vectors(conn, artist_id, stacked)
+    except Exception:
+        log.exception("analysis-vector persist failed for artist %s", artist_id)
     replace_artist_tags(conn, artist_id, scorer.score_vectors(stacked, ARTIST_TAG_TOP_K))
+
+
+def persist_analysis_vectors(conn: Connection, artist_id: str, stacked: np.ndarray) -> None:
+    """ADR-021 Tier A: store the MuLan per-window vectors + the artist-mean (the
+    exact vector scoring uses) so any future corpus re-analysis — re-score,
+    score centering, calibration/vocabulary changes, new analysis heads,
+    re-aggregation/window-weighting — becomes a math pass over these stored
+    vectors instead of a re-fetch + re-decode of the whole corpus.
+
+    The stored vectors are the raw MuLan AUDIO embeddings, vocabulary-independent,
+    stamped with model + window-config version. Idempotent: replaces this
+    artist+model's rows wholesale (the window count can change between runs, so an
+    upsert would leave stale high-idx rows)."""
+    from pipeline.embed_job import _vec_text
+    from pipeline.tags import TAG_MODEL
+    from pipeline.windows import WINDOW_VERSION
+
+    vecs = np.nan_to_num(np.asarray(stacked, dtype=np.float32))
+    if vecs.ndim != 2 or vecs.shape[0] == 0:
+        return
+    mean = vecs.mean(axis=0)
+    mean = mean / (np.linalg.norm(mean) + 1e-9)  # identical to score_vectors' mean
+    dim = int(vecs.shape[1])
+    conn.execute(
+        "DELETE FROM artist_analysis_vector WHERE artist_id = %s AND model = %s",
+        (artist_id, TAG_MODEL),
+    )
+    rows = [(artist_id, TAG_MODEL, "mean", 0, dim, _vec_text(mean), WINDOW_VERSION)]
+    rows += [
+        (artist_id, TAG_MODEL, "window", i, dim, _vec_text(vecs[i]), WINDOW_VERSION)
+        for i in range(vecs.shape[0])
+    ]
+    with conn.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO artist_analysis_vector "
+            "(artist_id, model, kind, idx, dim, embedding, window_version) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            rows,
+        )
 
 
 def run_heads(conn: Connection, heads: list, ctx: HeadContext) -> int:

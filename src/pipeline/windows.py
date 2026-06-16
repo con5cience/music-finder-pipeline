@@ -13,6 +13,12 @@ import numpy as np
 
 _HOP_S = 5  # candidate window every 5s — fine enough to find hooks, cheap
 
+# Provenance stamp for stored analysis vectors (ADR-021 Tier A). BUMP this
+# whenever the window-selection scheme changes (k, window_s, hop, the RMS-peak
+# algorithm): a new value flags every previously-stored vector as produced by a
+# different windowing, so a targeted re-analysis can find exactly what's stale.
+WINDOW_VERSION = "peak-v1"
+
 
 def peak_windows(
     mono: np.ndarray,
