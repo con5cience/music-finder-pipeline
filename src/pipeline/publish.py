@@ -152,6 +152,46 @@ def publish_incremental(factory: Connection, app: Connection, limit: int = 10000
     return n
 
 
+def republish_all(
+    factory: Connection,
+    app: Connection,
+    batch: int = 2000,
+    commit_each: bool = True,
+    start_after=None,
+    progress=None,
+) -> int:
+    """Full re-publish: re-derive EVERY serving field for every embedded artist,
+    in COMMITTED keyset batches. Use when a change the incremental watermark does
+    NOT trigger must reach serving — e.g. a tag-calibration change marks no artist
+    'changed', so publish_incremental skips them all.
+
+    Why not just reset the watermark and let publish_incremental run? Because that
+    re-derives 125k rows in ONE transaction (observed: a 2h+ open txn, no progress
+    visibility, everything lost on interrupt). This commits per batch, so progress
+    is durable and visible. Idempotent (publish_rows upserts), so a crash loses
+    only the in-flight batch — resume with start_after = the last committed id.
+
+    Does NOT advance the watermark: the caller sets it to the run's start time so
+    the next hourly incremental picks up anything embedded DURING the run."""
+    total = 0
+    after = start_after
+    while True:
+        rows = publishable_artists(factory, batch, since=None, after_id=after)
+        if not rows:
+            break
+        after = rows[-1][0]
+        publish_rows(factory, app, rows)
+        if commit_each:
+            app.commit()
+            factory.commit()  # also release the read snapshot — don't hold it all run
+        total += len(rows)
+        if progress:
+            progress(total, after)
+        if len(rows) < batch:
+            break
+    return total
+
+
 def prune_lost_embeddings(factory: Connection, app: Connection, batch: int = 10000) -> int:
     """Remove serving rows whose factory artist no longer has an embedding.
 
@@ -415,6 +455,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="publish embedded artists to the serving DB")
     ap.add_argument("--limit", type=int, default=1000)
     ap.add_argument("--incremental", action="store_true", help="watermark mode (the hourly sync)")
+    ap.add_argument("--republish-all", action="store_true",
+                    help="re-derive EVERY embedded artist in committed batches "
+                         "(for calibration/tag changes the watermark can't trigger)")
     args = ap.parse_args()
     app_dsn = os.environ.get("APP_DATABASE_URL")
     if not app_dsn:
@@ -427,6 +470,16 @@ def main() -> None:
             # upserts next run; the reverse order silently never publishes
             # the lost window again.
             app.commit()
+            factory.commit()
+        elif args.republish_all:
+            # capture the run-start BEFORE the loop; republish_all commits per
+            # batch internally. Set the watermark to that start AFTER success so
+            # the next hourly incremental catches anything embedded DURING the run
+            # (publish-sync must stay stopped until this finishes).
+            start = factory.execute("SELECT now()").fetchone()[0]
+            n = republish_all(factory, app, batch=args.limit,
+                              progress=lambda t, a: print(f"republished={t} after={a}", flush=True))
+            factory.execute("UPDATE publish_watermark SET last_run = %s WHERE id = 'default'", (start,))
             factory.commit()
         else:
             n = publish_artists(factory, app, args.limit)

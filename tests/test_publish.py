@@ -62,6 +62,55 @@ def _factory_artist(conn) -> str:
     return a
 
 
+def _embedded_artist(conn, i: int) -> str:
+    """A minimal publishable artist (distinct mbid-NULL identity, has an
+    embedding) — _factory_artist reuses one fixed MBID, so it can't make many."""
+    a = conn.execute(
+        "INSERT INTO artist (display_name, embedding_source) VALUES (%s, 'bandcamp') RETURNING id",
+        (f"Rep Fixture {i}",),
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
+        "VALUES (%s, 'mock-model', 2, '[0.6,0.8]', 4, 0.67)", (a,),
+    )
+    return str(a)
+
+
+def test_republish_all_upserts_every_artist_in_batches(conn):
+    from pipeline.publish import republish_all
+    _serving_schema(conn)
+    for i in range(5):
+        _embedded_artist(conn, i)
+    seen = []
+    # commit_each=False keeps the rolled-back fixture isolated; we still exercise
+    # the keyset loop + per-batch publish.
+    n = republish_all(conn, conn, batch=2, commit_each=False, progress=lambda t, _a: seen.append(t))
+    assert n == 5
+    assert conn.execute("SELECT count(*) FROM artists").fetchone()[0] == 5
+    assert seen == [2, 4, 5]  # batches of 2,2,1; cumulative progress
+
+
+def test_republish_all_idempotent(conn):
+    from pipeline.publish import republish_all
+    _serving_schema(conn)
+    for i in range(3):
+        _embedded_artist(conn, i)
+    republish_all(conn, conn, batch=10, commit_each=False)
+    republish_all(conn, conn, batch=10, commit_each=False)  # re-run must not duplicate
+    assert conn.execute("SELECT count(*) FROM artists").fetchone()[0] == 3
+
+
+def test_republish_all_resumes_from_after(conn):
+    from pipeline.publish import publishable_artists, republish_all
+    _serving_schema(conn)
+    for i in range(4):
+        _embedded_artist(conn, i)
+    page1 = publishable_artists(conn, 2, since=None)  # first 2 in keyset (a.id) order
+    n = republish_all(conn, conn, batch=10, commit_each=False, start_after=page1[-1][0])
+    assert n == 2  # only the artists with id > the 2nd id
+    assert conn.execute("SELECT count(*) FROM artists").fetchone()[0] == 2
+
+
 def test_slug_base_safe():
     assert slug_base("Püblish Fixture!") == "publish-fixture"
     assert slug_base("") == "artist"
