@@ -322,7 +322,7 @@ def test_centered_demotes_dominant_direction_tags(conn):
     """ADR-020 P5: a higher-raw-score tag that is aligned with the dominant audio
     direction (high d) is demoted below a lower-raw-score niche tag (low d), and
     gated out — the core of the centering fix."""
-    from pipeline.publish import artist_tags_centered_batch
+    from pipeline.publish import artist_tags_batch
     a = conn.execute("INSERT INTO artist (display_name) VALUES ('cen-a') RETURNING id").fetchone()[0]
     conn.execute(
         "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES "
@@ -333,7 +333,8 @@ def test_centered_demotes_dominant_direction_tags(conn):
         "('dominant-tag','muq-mulan-large',0.80,'v1',100),"
         "('niche-tag','muq-mulan-large',0.05,'v1',100)"
     )
-    tags = artist_tags_centered_batch(conn, [a], (0.4, 0.1, 4)).get(str(a), {})
+    # tag_centering present -> artist_tags_batch dispatches to the centered ranking
+    tags = artist_tags_batch(conn, [a], (0.4, 0.1, 4)).get(str(a), {})
     assert "niche-tag" in tags          # lower raw score, but survives centering
     assert "dominant-tag" not in tags   # higher raw score, but demoted + gated by centering
 

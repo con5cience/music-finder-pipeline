@@ -487,10 +487,18 @@ def artist_tags_fallback_batch(conn: Connection, aids: list) -> dict[str, dict]:
 
 
 def artist_tags_batch(conn: Connection, aids: list, g_moments) -> dict[str, dict]:
-    """Batched twin of artist_tags' PRIMARY path (ADR-020 P1-P3: artist-moment
-    z, idf demote, top-K, relative gate) for the whole batch in one query. The
-    rare fallback (an artist with no non-NaN artist_tag_scores) reuses the
-    per-artist artist_tags so the track-aggregation path stays identical."""
+    """THE artist-tag ranking (one entry point). Uses centering — rank by
+    `score - C*d_i`, ADR-020 Phase 5 — once tag_centering is populated; until then
+    the legacy z*idf path (ADR-020 P1-P3). Same shared track-aggregation fallback
+    either way. publish_rows calls only this."""
+    if conn.execute("SELECT EXISTS (SELECT 1 FROM tag_centering)").fetchone()[0]:
+        return _artist_tags_centered(conn, aids, g_moments)
+    return _artist_tags_zidf(conn, aids, g_moments)
+
+
+def _artist_tags_zidf(conn: Connection, aids: list, g_moments) -> dict[str, dict]:
+    """Legacy ranking (ADR-020 P1-P3): artist-moment z, idf demote, top-K,
+    relative gate. The fallback before centering data exists / if reverted."""
     gmean, gsd = (g_moments[0] or 0.0), (g_moments[1] or 1e-6)
     n_corpus = float(g_moments[2] or 1)
     ids = [str(a) for a in aids]
@@ -537,7 +545,7 @@ def artist_tags_batch(conn: Connection, aids: list, g_moments) -> dict[str, dict
     return out
 
 
-def artist_tags_centered_batch(conn: Connection, aids: list, g_moments, c: float | None = None) -> dict[str, dict]:
+def _artist_tags_centered(conn: Connection, aids: list, g_moments, c: float | None = None) -> dict[str, dict]:
     """ADR-020 Phase 5 — rank each artist's stored tags by `score - C*d_i`
     (d_i from tag_centering) instead of z*idf. This demotes tags aligned with the
     dominant audio direction (the scattered/magnet genres the z-score inflated by
@@ -608,13 +616,7 @@ def publish_rows(factory: Connection, app: Connection, rows: list[tuple]) -> int
     # set-based reads: one query each for the whole batch, not 5 per artist.
     aids = [r[0] for r in rows]
     urls_by = artist_urls_batch(factory, aids)
-    # ADR-020 P5: once tag_centering is populated, rank tags by score-C*d_i
-    # (sharper per-artist genre); until then, the legacy z*idf path.
-    has_centering = factory.execute("SELECT EXISTS (SELECT 1 FROM tag_centering)").fetchone()[0]
-    tags_by = (
-        artist_tags_centered_batch(factory, aids, g_artist) if has_centering
-        else artist_tags_batch(factory, aids, g_artist)
-    )
+    tags_by = artist_tags_batch(factory, aids, g_artist)  # centers when tag_centering present
     perc_by = artist_perceptual_batch(factory, aids)
     lang_by = artist_language_batch(factory, aids)
     loc_by = artist_location_batch(factory, aids)
