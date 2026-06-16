@@ -66,3 +66,48 @@ def test_payload_urls_exclude_unconfirmed_tier_b(conn):
     )
     urls = {u["platform"] for u in build_payload(conn, a)["urls"]}
     assert urls == {"bandcamp", "soundcloud"}  # B-tier deezer guess excluded
+
+
+def test_submit_tags_leads_with_bandcamp_tags(conn, monkeypatch):
+    """Bandcamp's human tags are submitted to MB ahead of our audio tags
+    (dedup case-insensitive, cap 5). HTTP + token mocked."""
+    import time
+    import urllib.request
+
+    import pipeline.mb_submit as mb
+
+    monkeypatch.setattr(mb, "access_token", lambda conn, target="live": "tok")
+    monkeypatch.setattr(time, "sleep", lambda _s: None)
+    captured = {}
+
+    class FakeResp:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def read(self):
+            return b""
+
+    def fake_urlopen(req, timeout=60):
+        captured["body"] = req.data.decode()
+        return FakeResp()
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    mbid = "00000000-feed-4bad-9bad-00000000af01"
+    a = conn.execute(
+        "INSERT INTO artist (display_name, mbid, embedding_source) VALUES ('SubBC', %s, 'bandcamp') RETURNING id",
+        (mbid,),
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES (%s,'zz-audiotag',0.9,'muq-mulan-large')",
+        (a,),
+    )
+    conn.execute(
+        "INSERT INTO bc_candidate (platform_id, band_name, band_url, status, artist_id, tags) "
+        "VALUES ('zz-bc-1','SubBC','https://x.bandcamp.com','admitted',%s,%s)",
+        (a, ["zz-bandcamptag"]),
+    )
+    assert mb.submit_tags(conn, limit=10, target="test") == 1
+    body = captured["body"]
+    assert "zz-bandcamptag" in body and "zz-audiotag" in body
+    assert body.index("zz-bandcamptag") < body.index("zz-audiotag")  # bandcamp leads

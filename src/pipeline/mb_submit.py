@@ -227,7 +227,14 @@ def submit_tags(conn: Connection, limit: int = 20, *, target: str = "live") -> i
 
     rows = conn.execute(
         """
-        SELECT a.id, a.mbid::text, array_agg(ats.tag ORDER BY ats.score DESC)
+        SELECT a.id, a.mbid::text,
+               (array_agg(ats.tag ORDER BY ats.score DESC))[1:5] AS audio_tags,
+               -- bc_candidate.tags = the human-applied Bandcamp tags (genre col
+               -- is a numeric artifact, unused); union of all candidates' tags.
+               coalesce((SELECT array_agg(DISTINCT lower(bt))
+                         FROM bc_candidate bc, unnest(bc.tags) bt
+                         WHERE bc.artist_id = a.id AND bt IS NOT NULL AND bt <> ''),
+                        '{}') AS bc_tags
         FROM artist a
         JOIN artist_tag_scores ats ON ats.artist_id = a.id AND ats.model = (
             SELECT model FROM artist_tag_scores LIMIT 1)
@@ -243,9 +250,16 @@ def submit_tags(conn: Connection, limit: int = 20, *, target: str = "live") -> i
     tok = access_token(conn, target=target)
     parts = ['<?xml version="1.0" encoding="UTF-8"?>',
              '<metadata xmlns="http://musicbrainz.org/ns/mmd-2.0#"><artist-list>']
-    for _aid, mbid, tags in rows:
+    for _aid, mbid, audio_tags, bc_tags in rows:
+        # Bandcamp's human-applied tags first (higher quality), then our audio
+        # tags fill the rest; dedup case-insensitively, cap at 5.
+        merged, seen = [], set()
+        for t in [*(bc_tags or []), *(audio_tags or [])]:
+            if t and t.lower() not in seen:
+                seen.add(t.lower())
+                merged.append(t)
         parts.append(f'<artist id="{mbid}"><user-tag-list>')
-        parts.extend(f"<user-tag><name>{sx.escape(t)}</name></user-tag>" for t in tags[:5])
+        parts.extend(f"<user-tag><name>{sx.escape(t)}</name></user-tag>" for t in merged[:5])
         parts.append("</user-tag-list></artist>")
     parts.append("</artist-list></metadata>")
     req = urllib.request.Request(
@@ -260,7 +274,7 @@ def submit_tags(conn: Connection, limit: int = 20, *, target: str = "live") -> i
             r.read()
     except urllib.error.HTTPError as e:
         raise SystemExit(f"MB tag submission failed ({e.code}): {e.read()[:200]!r}") from e
-    for aid, _mbid, _tags in rows:
+    for aid, _mbid, _audio, _bc in rows:
         conn.execute(
             "INSERT INTO mb_tag_submission (artist_id, target) VALUES (%s, %s) ON CONFLICT DO NOTHING",
             (aid, target))
