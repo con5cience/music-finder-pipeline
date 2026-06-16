@@ -318,6 +318,46 @@ def test_artist_urls_batch_matches_per_artist(conn):
     assert artist_urls(conn, a)  # non-empty, so this actually proves equivalence
 
 
+def test_centered_demotes_dominant_direction_tags(conn):
+    """ADR-020 P5: a higher-raw-score tag that is aligned with the dominant audio
+    direction (high d) is demoted below a lower-raw-score niche tag (low d), and
+    gated out — the core of the centering fix."""
+    from pipeline.publish import artist_tags_centered_batch
+    a = conn.execute("INSERT INTO artist (display_name) VALUES ('cen-a') RETURNING id").fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES "
+        "(%s,'dominant-tag',0.55,'muq-mulan-large'),(%s,'niche-tag',0.50,'muq-mulan-large')", (a, a),
+    )
+    conn.execute(
+        "INSERT INTO tag_centering (tag, model, d, mu_version, n_sample) VALUES "
+        "('dominant-tag','muq-mulan-large',0.80,'v1',100),"
+        "('niche-tag','muq-mulan-large',0.05,'v1',100)"
+    )
+    tags = artist_tags_centered_batch(conn, [a], (0.4, 0.1, 4)).get(str(a), {})
+    assert "niche-tag" in tags          # lower raw score, but survives centering
+    assert "dominant-tag" not in tags   # higher raw score, but demoted + gated by centering
+
+
+def test_publish_uses_centering_when_tag_centering_present(conn):
+    """publish_rows ranks by centering when tag_centering has rows; without it,
+    the existing (legacy) tests prove it stays on the z*idf path."""
+    from pipeline.publish import publishable_artists, publish_rows
+    _serving_schema(conn)
+    a = _embedded_artist(conn, 0)
+    conn.execute(
+        "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES "
+        "(%s,'dominant-tag',0.55,'muq-mulan-large'),(%s,'niche-tag',0.50,'muq-mulan-large')", (a, a),
+    )
+    conn.execute(
+        "INSERT INTO tag_centering (tag, model, d, mu_version, n_sample) VALUES "
+        "('dominant-tag','muq-mulan-large',0.80,'v1',100),"
+        "('niche-tag','muq-mulan-large',0.05,'v1',100)"
+    )
+    publish_rows(conn, conn, publishable_artists(conn, 10))
+    tags = conn.execute("SELECT tags FROM artists WHERE id = %s", (a,)).fetchone()[0]
+    assert "niche-tag" in tags and "dominant-tag" not in tags
+
+
 def test_refresh_calibration_writes_both_track_and_artist_moments(conn):
     """ADR-020 P1: refresh writes track-source moments (bare model) AND
     artist-source moments (model+'#artist') from their respective tables,

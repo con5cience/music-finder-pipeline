@@ -114,3 +114,51 @@ def replace_artist_tags(conn: Connection, artist_id, tag_scores: list[tuple[str,
             "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES (%s, %s, %s, %s)",
             [(artist_id, tag, score, TAG_MODEL) for tag, score in tag_scores],
         )
+
+
+CENTERING_MU_VERSION = "muq-mulan-v1"
+
+
+def refresh_centering(conn: Connection, scorer, sample: int = 20000) -> int:
+    """ADR-020 Phase 5: per-tag d_i = (genre text embedding) . (corpus-mean audio
+    direction), computed from the stored MuLan artist-mean vectors. Read at
+    publish to demote anisotropy-aligned (scattered/magnet) tags via
+    `score - C*d_i`. Needs the model (vocab text embeddings) so it runs offline
+    here, NOT at publish (publish-sync carries no model). Returns tags written."""
+    scorer._ensure()
+    V = np.asarray(scorer._vocab_matrix, dtype=np.float32)
+    V = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-9)
+    rows = conn.execute(
+        "SELECT embedding::text FROM artist_analysis_vector WHERE kind = 'mean' "
+        "ORDER BY random() LIMIT %s",
+        (sample,),
+    ).fetchall()
+    if not rows:
+        return 0
+    M = np.stack([
+        np.array([float(x) for x in r[0].strip("[]").split(",")], dtype=np.float32) for r in rows
+    ])
+    mu = M.mean(axis=0)
+    mu = mu / (np.linalg.norm(mu) + 1e-9)
+    d = V @ mu  # per-tag projection onto the dominant audio direction
+    vocab = scorer.vocabulary
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM tag_centering WHERE model = %s", (TAG_MODEL,))
+        cur.executemany(
+            "INSERT INTO tag_centering (tag, model, d, mu_version, n_sample) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            [(vocab[i], TAG_MODEL, float(d[i]), CENTERING_MU_VERSION, len(rows))
+             for i in range(len(vocab))],
+        )
+    return len(vocab)
+
+
+def load_centering(conn: Connection, model: str = TAG_MODEL) -> dict[str, float]:
+    """{tag: d_i} for publish-time centering; empty when not computed yet, in
+    which case publish falls back to the legacy z-score ranking."""
+    return {
+        t: float(d)
+        for t, d in conn.execute(
+            "SELECT tag, d FROM tag_centering WHERE model = %s", (model,)
+        ).fetchall()
+    }

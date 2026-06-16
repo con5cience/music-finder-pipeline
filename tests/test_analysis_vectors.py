@@ -93,3 +93,28 @@ def _window_count(conn, artist_id) -> int:
         "SELECT count(*) FROM artist_analysis_vector WHERE artist_id = %s AND kind = 'window'",
         (artist_id,),
     ).fetchone()[0]
+
+
+def test_refresh_centering_computes_d_from_stored_vectors(conn):
+    """ADR-020 P5: refresh_centering writes per-tag d_i = (vocab text emb) . (mean
+    audio direction) from the stored MuLan vectors. With one stored vector [1,0],
+    mu-hat=[1,0], so an aligned vocab row scores d=1 and an orthogonal one d=0."""
+    import numpy as np
+    from pipeline.tags import load_centering, refresh_centering
+
+    a = conn.execute("INSERT INTO artist (display_name) VALUES ('rc') RETURNING id").fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_analysis_vector (artist_id, model, kind, idx, dim, embedding, window_version) "
+        "VALUES (%s,'muq-mulan-large','mean',0,2,'[1,0]','peak-v1')", (a,),
+    )
+
+    class FakeScorer:
+        vocabulary = ["t-aligned", "t-ortho"]
+        _vocab_matrix = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+        def _ensure(self):
+            pass
+
+    assert refresh_centering(conn, FakeScorer(), sample=10) == 2
+    cen = load_centering(conn)
+    assert abs(cen["t-aligned"] - 1.0) < 1e-5
+    assert abs(cen["t-ortho"] - 0.0) < 1e-5

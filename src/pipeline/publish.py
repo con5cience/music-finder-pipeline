@@ -15,6 +15,7 @@ Env:  APP_DATABASE_URL (no default — publishing is deliberate)
 
 from __future__ import annotations
 
+import os
 import re
 import unicodedata
 
@@ -33,6 +34,13 @@ MAGNET_RATE_CEILING = 1.0
 # artist's OWN best — stops force-padding a thin-signal artist to TAG_K slots with
 # demoted magnets (real-data sim: avg magnets/artist 1.35 -> 0.56, ~4 tags kept).
 TAG_REL_GATE = 0.5
+# ADR-020 P5: centering strength. When tag_centering data exists, publish ranks by
+# `score - CENTERING_C * d_i` (d_i = tag alignment with the dominant audio
+# direction) instead of z*idf — demotes the anisotropy-aligned scattered/magnet
+# tags that the z-score (which divides by per-tag spread) actually inflated.
+# 0.585 = the corpus-mean projection; validated to recover ~2/3 of full re-embed
+# centering from stored scores alone. Empty tag_centering -> legacy z*idf path.
+CENTERING_C = float(os.environ.get("PIPELINE_CENTERING_C", "0.585"))
 
 _URL_BUILDERS = {
     "deezer": lambda pid: f"https://www.deezer.com/artist/{pid}",
@@ -529,6 +537,59 @@ def artist_tags_batch(conn: Connection, aids: list, g_moments) -> dict[str, dict
     return out
 
 
+def artist_tags_centered_batch(conn: Connection, aids: list, g_moments, c: float | None = None) -> dict[str, dict]:
+    """ADR-020 Phase 5 — rank each artist's stored tags by `score - C*d_i`
+    (d_i from tag_centering) instead of z*idf. This demotes tags aligned with the
+    dominant audio direction (the scattered/magnet genres the z-score inflated by
+    dividing out per-tag spread), sharpening per-artist genre (a punk band -> all
+    punk, a metal band -> all metal). Validated to recover ~2/3 of full re-embed
+    centering from stored scores alone — whole corpus, no re-embed.
+
+    Weight still comes from the calibrated z so tag_vector magnitudes stay normal.
+    Relative gate + positivity (centered > 0) drop the long tail; an artist whose
+    every tag is below the dominant direction gets none rather than wrong ones.
+    Same rare track-aggregation fallback as the legacy path."""
+    if c is None:
+        c = CENTERING_C
+    gmean, gsd = (g_moments[0] or 0.0), (g_moments[1] or 1e-6)
+    ids = [str(a) for a in aids]
+    out: dict[str, dict] = {}
+    for aid, tag, z in conn.execute(
+        """
+        WITH s AS (
+            SELECT ats.artist_id::text AS aid, ats.tag,
+                   (ats.score - coalesce(tc.mean, %(gm)s)) / coalesce(tc.stddev, %(gs)s) AS z,
+                   ats.score - %(c)s * coalesce(cn.d, 0.0) AS centered
+            FROM artist_tag_scores ats
+            LEFT JOIN tag_centering cn ON cn.tag = ats.tag AND cn.model = ats.model
+            LEFT JOIN tag_calibration tc ON tc.tag = ats.tag AND tc.model = ats.model || %(suf)s
+            WHERE ats.artist_id = ANY(%(aids)s::uuid[]) AND ats.score != 'NaN'::real
+        ),
+        ranked AS (
+            SELECT aid, tag, z, centered,
+                   row_number() OVER (PARTITION BY aid ORDER BY centered DESC) AS rn,
+                   max(centered) OVER (PARTITION BY aid) AS top_c
+            FROM s
+        )
+        SELECT aid, tag, z FROM ranked
+        WHERE rn <= %(k)s AND centered > 0 AND centered >= %(gate)s * top_c
+        """,
+        {"gm": gmean, "gs": gsd, "c": c, "suf": ARTIST_SUFFIX, "aids": ids,
+         "k": TAG_K, "gate": TAG_REL_GATE},
+    ).fetchall():
+        out.setdefault(aid, {})[tag] = max(1, round(float(z)) + 1)
+    covered = {
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT artist_id::text FROM artist_tag_scores "
+            "WHERE artist_id = ANY(%s::uuid[]) AND score != 'NaN'::real", (ids,)
+        ).fetchall()
+    }
+    uncovered = [a for a in aids if str(a) not in covered]
+    if uncovered:
+        out.update(artist_tags_fallback_batch(conn, uncovered))
+    return out
+
+
 def publish_artists(factory: Connection, app: Connection, limit: int = 1000, since=None) -> int:
     """Upsert embedded artists into the serving DB. Returns artists published."""
     return publish_rows(factory, app, publishable_artists(factory, limit, since))
@@ -547,7 +608,13 @@ def publish_rows(factory: Connection, app: Connection, rows: list[tuple]) -> int
     # set-based reads: one query each for the whole batch, not 5 per artist.
     aids = [r[0] for r in rows]
     urls_by = artist_urls_batch(factory, aids)
-    tags_by = artist_tags_batch(factory, aids, g_artist)
+    # ADR-020 P5: once tag_centering is populated, rank tags by score-C*d_i
+    # (sharper per-artist genre); until then, the legacy z*idf path.
+    has_centering = factory.execute("SELECT EXISTS (SELECT 1 FROM tag_centering)").fetchone()[0]
+    tags_by = (
+        artist_tags_centered_batch(factory, aids, g_artist) if has_centering
+        else artist_tags_batch(factory, aids, g_artist)
+    )
     perc_by = artist_perceptual_batch(factory, aids)
     lang_by = artist_language_batch(factory, aids)
     loc_by = artist_location_batch(factory, aids)
