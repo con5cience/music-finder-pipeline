@@ -97,6 +97,7 @@ slop-audit = "python -m pipeline.slop_detect"   # behavioral AI-slop sweep (flag
 ai-probe = "python -m pipeline.ai_probe"   # AI-vs-human linear probe on MuQ embeddings (needs --ai-dir)
 discover = "python -m pipeline.discovery"   # ADR-019 BC discovery (trickle valve via --admit)
 mb-submit = "python -m pipeline.mb_submit"   # MB contribution lane (consent → queue → tags)
+deezer-embeds = "python -m pipeline.deezer_embeds"   # sync analyzed Deezer track ids -> serving deezer_top_tracks (#26)
 wave3 = "python -m pipeline.wave3"   # gated heads, selected slices only
 analysis-backfill = "python -m pipeline.backfill_analysis"   # Wave-1 heads over already-embedded tracks
 search-bind = "python -m pipeline.search_bind"   # 3d B-tier binding over unbound artists
