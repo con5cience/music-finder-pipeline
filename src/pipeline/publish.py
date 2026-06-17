@@ -41,6 +41,11 @@ TAG_REL_GATE = 0.5
 # 0.585 = the corpus-mean projection; validated to recover ~2/3 of full re-embed
 # centering from stored scores alone. Empty tag_centering -> legacy z*idf path.
 CENTERING_C = float(os.environ.get("PIPELINE_CENTERING_C", "0.585"))
+# Audio tier shape: aim for the curated target of 1-4 intrinsic tags (like MB's),
+# not a padded list. Magnet-pruned + centered, keep only the top few within a
+# TIGHT margin of the best; min 1 so an audio artist is never empty.
+AUDIO_TAG_K = int(os.environ.get("PIPELINE_AUDIO_TAG_K", "4"))
+AUDIO_REL_GATE = float(os.environ.get("PIPELINE_AUDIO_GATE", "0.85"))
 
 _URL_BUILDERS = {
     "deezer": lambda pid: f"https://www.deezer.com/artist/{pid}",
@@ -471,7 +476,9 @@ def artist_tags_fallback_batch(conn: Connection, aids: list) -> dict[str, dict]:
             JOIN audio_track t ON t.id = tts.track_id
             CROSS JOIN g
             LEFT JOIN tag_calibration tc ON tc.tag = tts.tag AND tc.model = tts.model
+            LEFT JOIN tag_audio_blocklist bl ON bl.tag = tts.tag
             WHERE t.artist_id = ANY(%(aids)s::uuid[]) AND tts.score != 'NaN'::real
+              AND bl.tag IS NULL   -- magnet prune (ADR-020 P4), same as the primary tier
             GROUP BY t.artist_id, tts.tag
         ),
         ranked AS (
@@ -480,7 +487,7 @@ def artist_tags_fallback_batch(conn: Connection, aids: list) -> dict[str, dict]:
         )
         SELECT aid, tag, mz FROM ranked WHERE rn <= %(k)s
         """,
-        {"aids": [str(a) for a in aids], "k": TAG_K},
+        {"aids": [str(a) for a in aids], "k": AUDIO_TAG_K},
     ).fetchall():
         out.setdefault(aid, {})[tag] = max(1, round(float(mz)) + 1)
     return out
@@ -546,17 +553,12 @@ def _artist_tags_zidf(conn: Connection, aids: list, g_moments) -> dict[str, dict
 
 
 def _artist_tags_centered(conn: Connection, aids: list, g_moments, c: float | None = None) -> dict[str, dict]:
-    """ADR-020 Phase 5 — rank each artist's stored tags by `score - C*d_i`
-    (d_i from tag_centering) instead of z*idf. This demotes tags aligned with the
-    dominant audio direction (the scattered/magnet genres the z-score inflated by
-    dividing out per-tag spread), sharpening per-artist genre (a punk band -> all
-    punk, a metal band -> all metal). Validated to recover ~2/3 of full re-embed
-    centering from stored scores alone — whole corpus, no re-embed.
-
-    Weight still comes from the calibrated z so tag_vector magnitudes stay normal.
-    Relative gate + positivity (centered > 0) drop the long tail; an artist whose
-    every tag is below the dominant direction gets none rather than wrong ones.
-    Same rare track-aggregation fallback as the legacy path."""
+    """The AUDIO tag tier (lowest priority; MB + Bandcamp win first). Rank by
+    `score - C*d_i` (centering, demotes the anisotropy direction), EXCLUDE the
+    data-driven magnet blocklist (tag_audio_blocklist — orthodox pop, kilapanga,
+    j-rock, …), and keep only the top 1-4 within a TIGHT margin of the best — the
+    curated target of a few intrinsic tags, never a padded list. min 1 (rn=1
+    always) so an audio artist is never empty. Weight from the calibrated z."""
     if c is None:
         c = CENTERING_C
     gmean, gsd = (g_moments[0] or 0.0), (g_moments[1] or 1e-6)
@@ -571,7 +573,9 @@ def _artist_tags_centered(conn: Connection, aids: list, g_moments, c: float | No
             FROM artist_tag_scores ats
             LEFT JOIN tag_centering cn ON cn.tag = ats.tag AND cn.model = ats.model
             LEFT JOIN tag_calibration tc ON tc.tag = ats.tag AND tc.model = ats.model || %(suf)s
+            LEFT JOIN tag_audio_blocklist bl ON bl.tag = ats.tag
             WHERE ats.artist_id = ANY(%(aids)s::uuid[]) AND ats.score != 'NaN'::real
+              AND bl.tag IS NULL   -- magnet prune (ADR-020 P4)
         ),
         ranked AS (
             SELECT aid, tag, z, centered,
@@ -580,10 +584,11 @@ def _artist_tags_centered(conn: Connection, aids: list, g_moments, c: float | No
             FROM s
         )
         SELECT aid, tag, z FROM ranked
-        WHERE rn <= %(k)s AND centered > 0 AND centered >= %(gate)s * top_c
+        -- top 1-4 within a tight margin; rn=1 always kept (never empty)
+        WHERE rn <= %(k)s AND (rn = 1 OR (centered > 0 AND centered >= %(gate)s * top_c))
         """,
         {"gm": gmean, "gs": gsd, "c": c, "suf": ARTIST_SUFFIX, "aids": ids,
-         "k": TAG_K, "gate": TAG_REL_GATE},
+         "k": AUDIO_TAG_K, "gate": AUDIO_REL_GATE},
     ).fetchall():
         out.setdefault(aid, {})[tag] = max(1, round(float(z)) + 1)
     covered = {
@@ -630,6 +635,28 @@ def mb_genres_batch(conn: Connection, aids: list) -> dict[str, dict]:
     return capped
 
 
+def bandcamp_tags_batch(conn: Connection, aids: list) -> dict[str, dict]:
+    """HUMAN Bandcamp tags per artist (bc_candidate.tags) — the middle tier: what
+    the artist self-describes on the site. Used where MB has no editorial genres;
+    later clobbered by MB once the artist is approved + reingested. Uniform weight
+    (human tags carry no score), capped at AUDIO_TAG_K to match curated concision.
+    Empty for artists with no Bandcamp tags (so the audio tier takes over)."""
+    out: dict[str, dict] = {}
+    for aid, tag in conn.execute(
+        """
+        SELECT DISTINCT bc.artist_id::text AS aid, lower(bt) AS tag
+        FROM bc_candidate bc, unnest(bc.tags) bt
+        WHERE bc.artist_id = ANY(%s::uuid[]) AND bt IS NOT NULL AND bt <> ''
+        ORDER BY aid, tag
+        """,
+        ([str(a) for a in aids],),
+    ).fetchall():
+        d = out.setdefault(aid, {})
+        if len(d) < AUDIO_TAG_K:
+            d[tag] = 1
+    return out
+
+
 def publish_artists(factory: Connection, app: Connection, limit: int = 1000, since=None) -> int:
     """Upsert embedded artists into the serving DB. Returns artists published."""
     return publish_rows(factory, app, publishable_artists(factory, limit, since))
@@ -640,18 +667,22 @@ def publish_rows(factory: Connection, app: Connection, rows: list[tuple]) -> int
 
     if not rows:
         return 0
-    # global tag moments ONCE per batch (review finding: the per-artist CTE
-    # full-scanned artist_tag_scores for EVERY artist — infeasible at 451k)
-    g_artist = factory.execute(
-        "SELECT avg(score), greatest(stddev(score), 1e-6), count(DISTINCT artist_id) FROM artist_tag_scores"
-    ).fetchone()
     # set-based reads: one query each for the whole batch, not 5 per artist.
     aids = [r[0] for r in rows]
     urls_by = artist_urls_batch(factory, aids)
-    # Tags: MusicBrainz editorial genres when present (accurate), else audio tags.
+    # Tags (ADR-022), priority order, never empty:
+    #   1. MB editorial genres (accurate)  2. Bandcamp human tags
+    #   3. magnet-pruned centered audio, top 1-4 (the long tail)
     mb_by = mb_genres_batch(factory, aids)
-    audio_by = artist_tags_batch(factory, aids, g_artist)
-    tags_by = {str(a): (mb_by.get(str(a)) or audio_by.get(str(a), {})) for a in aids}
+    bc_by = bandcamp_tags_batch(factory, aids)
+    audio_aids = [a for a in aids if str(a) not in mb_by and str(a) not in bc_by]
+    audio_by: dict[str, dict] = {}
+    if audio_aids:
+        g_artist = factory.execute(
+            "SELECT avg(score), greatest(stddev(score), 1e-6), count(DISTINCT artist_id) FROM artist_tag_scores"
+        ).fetchone()
+        audio_by = _artist_tags_centered(factory, audio_aids, g_artist)
+    tags_by = {str(a): (mb_by.get(str(a)) or bc_by.get(str(a)) or audio_by.get(str(a)) or {}) for a in aids}
     perc_by = artist_perceptual_batch(factory, aids)
     lang_by = artist_language_batch(factory, aids)
     loc_by = artist_location_batch(factory, aids)

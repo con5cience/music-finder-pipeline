@@ -143,8 +143,14 @@ def test_publish_upserts_and_is_idempotent(conn):
                        "signal_ratio, embedding_source FROM artists WHERE mbid = %s", (MBID,)).fetchone()
     assert row[0] == "Püblish Fixture"
     assert row[1] == "publish-fixture"
-    tags = row[2] if isinstance(row[2], dict) else json.loads(row[2])
-    assert "zz-pub-genre" in tags and all(isinstance(v, int) and v >= 1 for v in tags.values())
+    # 3-tier (ADR-022), never empty: this fixture has no MB genres and no
+    # bc_candidate tags, so it falls to the AUDIO tier — track-aggregation
+    # fallback over its track_tag_scores. zz-pub-genre (0.9) is kept; zz-pub-weak
+    # (0.1) is below the corpus mean and dropped. MB precedence + Bandcamp tier
+    # are covered by test_publish_prefers_mb_genres_over_audio / *_bandcamp_*.
+    tags = row[2] if isinstance(row[2], dict) else (json.loads(row[2]) if row[2] else {})
+    assert "zz-pub-genre" in tags
+    assert "zz-pub-weak" not in tags
     assert row[3] == "[0.6,0.8]"
     assert row[4] == "https://zz-pub-band.bandcamp.com"
     assert abs(row[5] - 0.67) < 1e-6        # signal_ratio carried (9b)
@@ -339,24 +345,8 @@ def test_centered_demotes_dominant_direction_tags(conn):
     assert "dominant-tag" not in tags   # higher raw score, but demoted + gated by centering
 
 
-def test_publish_uses_centering_when_tag_centering_present(conn):
-    """publish_rows ranks by centering when tag_centering has rows; without it,
-    the existing (legacy) tests prove it stays on the z*idf path."""
-    from pipeline.publish import publishable_artists, publish_rows
-    _serving_schema(conn)
-    a = _embedded_artist(conn, 0)
-    conn.execute(
-        "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES "
-        "(%s,'dominant-tag',0.55,'muq-mulan-large'),(%s,'niche-tag',0.50,'muq-mulan-large')", (a, a),
-    )
-    conn.execute(
-        "INSERT INTO tag_centering (tag, model, d, mu_version, n_sample) VALUES "
-        "('dominant-tag','muq-mulan-large',0.80,'v1',100),"
-        "('niche-tag','muq-mulan-large',0.05,'v1',100)"
-    )
-    publish_rows(conn, conn, publishable_artists(conn, 10))
-    tags = conn.execute("SELECT tags FROM artists WHERE id = %s", (a,)).fetchone()[0]
-    assert "niche-tag" in tags and "dominant-tag" not in tags
+# (removed test_publish_uses_centering_when_tag_centering_present — ADR-022:
+# publish is MB-only now, audio/centering is no longer in the publish path.)
 
 
 def test_refresh_calibration_writes_both_track_and_artist_moments(conn):
@@ -627,3 +617,31 @@ def test_publish_prefers_mb_genres_over_audio(conn):
     # MB-keyed artists get a fresh serving id (ON CONFLICT mbid) — query by mbid
     tags = conn.execute("SELECT tags FROM artists WHERE mbid=%s", (mbid,)).fetchone()[0]
     assert 'zz-mbgenre' in tags and 'zz-audiotag' not in tags
+
+
+def test_publish_uses_bandcamp_tags_when_no_mb_genres(conn):
+    """Middle tier: artist with no MB genres but human Bandcamp tags gets those
+    tags (verbatim) — NOT the audio tier — until MB later clobbers them."""
+    from pipeline.publish import publish_rows, publishable_artists
+    _serving_schema(conn)
+    a = conn.execute(
+        "INSERT INTO artist (display_name, embedding_source) VALUES ('BCOnly', 'bandcamp') RETURNING id"
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
+        "VALUES (%s,'mock-model',2,'[0.6,0.8]',4,0.67)", (a,),
+    )
+    conn.execute(
+        "INSERT INTO bc_candidate (platform_id, band_name, band_url, tags, status, artist_id) "
+        "VALUES ('zz-bc-only','BCOnly','https://x','{\"zz-shoegaze\",\"zz-dream pop\"}','admitted',%s)",
+        (a,),
+    )
+    # an audio tag that must be IGNORED because the Bandcamp tier wins
+    conn.execute(
+        "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES (%s,'zz-audiotag',0.9,'muq-mulan-large')",
+        (a,),
+    )
+    publish_rows(conn, conn, publishable_artists(conn, 10))
+    tags = conn.execute("SELECT tags FROM artists WHERE id=%s", (a,)).fetchone()[0]
+    assert 'zz-shoegaze' in tags and 'zz-dream pop' in tags
+    assert 'zz-audiotag' not in tags

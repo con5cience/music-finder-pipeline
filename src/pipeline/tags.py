@@ -162,3 +162,36 @@ def load_centering(conn: Connection, model: str = TAG_MODEL) -> dict[str, float]
             "SELECT tag, d FROM tag_centering WHERE model = %s", (model,)
         ).fetchall()
     }
+
+
+def refresh_audio_blocklist(conn: Connection, audio_min: float = 0.08, mb_max: int = 100) -> int:
+    """ADR-020 Phase 4: the data-driven magnet prune. A tag the audio model assigns
+    to > audio_min of artists but MB editors apply to < mb_max artists is an
+    anisotropy artifact (kilapanga, orthodox pop, pumpcore, fm synthesis, j-rock,
+    teen pop, ...). Stored in tag_audio_blocklist; excluded from the AUDIO tag tier
+    at publish (MB/Bandcamp tiers untouched). Pure SQL — no model needed."""
+    conn.execute("DELETE FROM tag_audio_blocklist")
+    conn.execute(
+        """
+        INSERT INTO tag_audio_blocklist (tag, audio_pct, mb_n)
+        WITH au AS (
+            SELECT tag, count(DISTINCT artist_id)::float
+                   / NULLIF((SELECT count(DISTINCT artist_id) FROM artist_tag_scores), 0) AS r
+            FROM artist_tag_scores GROUP BY tag
+        ),
+        mb AS (
+            SELECT coalesce(gc.name, gd.name) AS tag, count(DISTINCT at.artist) AS n
+            FROM mb_raw.artist_tag at JOIN mb_raw.tag t ON t.id = at.tag
+            LEFT JOIN mb_raw.genre gd ON gd.name = lower(t.name)
+            LEFT JOIN mb_raw.genre_alias gal ON gal.name = lower(t.name)
+            LEFT JOIN mb_raw.genre gc ON gc.id = gal.genre
+            WHERE at.count > 0 AND (gd.name IS NOT NULL OR gc.name IS NOT NULL)
+            GROUP BY 1
+        )
+        SELECT au.tag, (au.r * 100)::real, coalesce(mb.n, 0)
+        FROM au LEFT JOIN mb ON mb.tag = au.tag
+        WHERE au.r > %s AND coalesce(mb.n, 0) < %s
+        """,
+        (audio_min, mb_max),
+    )
+    return conn.execute("SELECT count(*) FROM tag_audio_blocklist").fetchone()[0]
