@@ -79,6 +79,20 @@ def test_create_artist_maps_fields_and_parses_mbid(conn, link_types):
     assert "edit-artist.url.1.text" not in form  # tidal: no mapped rel name
 
 
+def test_link_type_ids_picks_artist_url_not_label_or_genre(conn, link_types):
+    """MB reuses a link-type name across entity types; we must resolve the
+    ARTIST<->url one, not an arbitrary label/genre-url with the same name."""
+    from pipeline.mb_artist_create import link_type_ids
+
+    conn.execute(
+        "INSERT INTO mb_raw.link_type (id, gid, entity_type0, entity_type1, name, "
+        "description, link_phrase, reverse_link_phrase, long_link_phrase) VALUES "
+        "(9903, gen_random_uuid(), 'label','url','bandcamp','d','p','rp','lp'), "
+        "(9904, gen_random_uuid(), 'genre','url','bandcamp','d','p','rp','lp') ON CONFLICT DO NOTHING")
+    ids = link_type_ids(conn)
+    assert ids["bandcamp"] == 9901  # artist-url, never the label(9903)/genre(9904)-url
+
+
 def test_rehearsal_consumes_spot_check_but_live_requires_approved(conn, link_types):
     a = _staged(conn, "stagedband")
     mb = FakeMB()

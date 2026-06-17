@@ -38,15 +38,30 @@ _URL_REL_NAMES = {"bandcamp": "bandcamp", "soundcloud": "soundcloud",
                   "youtube": "youtube", "deezer": "free streaming"}
 
 
-def default_transport():
+def default_transport(session_cookie: str | None = None, host: str | None = None):
     """Cookie-keeping opener; returns (status, headers, body) and never
-    follows redirects (the created-artist MBID rides the 302 Location)."""
+    follows redirects (the created-artist MBID rides the 302 Location).
+
+    When session_cookie is given it is pre-seeded as the MB website session
+    (musicbrainz_server_session) for `host` — the only viable auth now that MB
+    login is MetaBrainz SSO behind MTCaptcha (no programmatic form login). Grab
+    the cookie from a browser logged into the target server."""
+    from http.cookiejar import Cookie
+
+    jar = CookieJar()
+    if session_cookie and host:
+        jar.set_cookie(Cookie(
+            version=0, name="musicbrainz_server_session", value=session_cookie,
+            port=None, port_specified=False, domain=host, domain_specified=True,
+            domain_initial_dot=False, path="/", path_specified=True, secure=True,
+            expires=None, discard=False, comment=None, comment_url=None, rest={}))
+
     class _NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *a, **k):  # noqa: D102
             return None
 
     opener = urllib.request.build_opener(
-        urllib.request.HTTPCookieProcessor(CookieJar()), _NoRedirect())
+        urllib.request.HTTPCookieProcessor(jar), _NoRedirect())
 
     def fetch(url: str, data: dict | None = None) -> tuple[int, dict, bytes]:
         body = urllib.parse.urlencode(data).encode() if data is not None else None
@@ -136,21 +151,42 @@ def submit_artists(conn: Connection, *, target: str, limit: int = 5,
     if not rows:
         return {"submitted": 0}
     if fetch is None:
-        fetch = default_transport()
-        # test and live are separate MB servers/accounts. Convention: test uses
-        # the _TEST-suffixed creds; production (live) uses the bare vars.
-        if target == "test":
-            username = username or _env_fallback("MB_BOT_USER_TEST")
-            password = password or _env_fallback("MB_BOT_PASSWORD_TEST")
-            hint = "MB_BOT_USER_TEST / MB_BOT_PASSWORD_TEST"
+        base = base_for(target)
+        host = urllib.parse.urlsplit(base).hostname
+        # Primary auth: a browser-obtained session cookie. MB login is MetaBrainz
+        # SSO behind MTCaptcha — there is NO programmatic form login. Grab the
+        # musicbrainz_server_session cookie from a browser logged into the target
+        # server: MB_BOT_SESSION_TEST (test) / MB_BOT_SESSION (live).
+        session = _env_fallback("MB_BOT_SESSION_TEST") if target == "test" else _env_fallback("MB_BOT_SESSION")
+        if session:
+            fetch = default_transport(session_cookie=session, host=host)
         else:
-            username = username or _env_fallback("MB_BOT_USER")
-            password = password or _env_fallback("MB_BOT_PASSWORD")
-            hint = "MB_BOT_USER / MB_BOT_PASSWORD"
-        if not username or not password:
-            raise SystemExit(f"{hint} not set — the edit system needs the bot's website "
-                             "session, not OAuth")
-        login(fetch, target, username, password)
+            # Fallback: classic username/password form login — works ONLY where MB
+            # is not behind SSO/captcha (e.g. a local musicbrainz-docker). Against
+            # the public servers it fails the preflight below.
+            fetch = default_transport()
+            if target == "test":
+                username = username or _env_fallback("MB_BOT_USER_TEST")
+                password = password or _env_fallback("MB_BOT_PASSWORD_TEST")
+            else:
+                username = username or _env_fallback("MB_BOT_USER")
+                password = password or _env_fallback("MB_BOT_PASSWORD")
+            sess_var = "MB_BOT_SESSION_TEST" if target == "test" else "MB_BOT_SESSION"
+            if not username or not password:
+                raise SystemExit(f"no MB auth — set {sess_var} (browser session cookie) for the "
+                                 "SSO servers, or MB_BOT_USER[_TEST]/MB_BOT_PASSWORD[_TEST] for a "
+                                 "non-SSO (local) server")
+            login(fetch, target, username, password)
+        # Preflight: confirm the session reaches the edit form before submitting
+        # anything — a stale/missing cookie otherwise silently 302s to login and
+        # every create fails with a confusing "no MBID in redirect".
+        sess_var = "MB_BOT_SESSION_TEST" if target == "test" else "MB_BOT_SESSION"
+        st, _h, body = fetch(f"{base}/artist/create")
+        if st != 200 or not _CSRF_RE.search(body.decode("utf-8", "replace")):
+            raise SystemExit(
+                f"MB session not authenticated (GET /artist/create -> HTTP {st}, no edit form). "
+                f"Log into {host} in a browser and set {sess_var} to the "
+                "musicbrainz_server_session cookie value.")
     out = {"submitted": 0, "failed": 0}
     for sid, artist_id, payload in rows:
         try:
