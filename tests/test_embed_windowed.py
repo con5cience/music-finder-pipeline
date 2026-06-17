@@ -235,6 +235,55 @@ def test_fetch_audio_yt_scheme(monkeypatch, tmp_path):
         fetch_audio("yt:vid999", tmp_path)
 
 
+def test_yt_audio_format_caps_bitrate():
+    """Fetch-size reduction (task: YouTube fetch size): the format selector
+    prefers a <=cap-kbps audio stream (the embedder downsamples to ~24kHz mono,
+    so bestaudio's 128-160kbps is over-spec) while keeping a hard bestaudio
+    fallback so extraction never fails on formats with no abr tag."""
+    from pipeline.embed_job import _yt_audio_format
+
+    assert _yt_audio_format(80) == (
+        "bestaudio[abr<=80][ext=m4a]/bestaudio[abr<=80]/bestaudio[ext=m4a]/bestaudio"
+    )
+    assert "abr<=64" in _yt_audio_format(64)        # cap is honored
+    assert _yt_audio_format(50).endswith("/bestaudio")  # unconstrained final fallback
+
+
+def test_fetch_audio_yt_passes_capped_format(monkeypatch, tmp_path):
+    """_fetch_youtube hands yt-dlp the bitrate-capped format (the actual
+    fetch-size lever), driven by the env-overridable _YT_MAX_ABR knob."""
+    import sys
+    import types
+
+    from pipeline import embed_job
+    from pipeline.embed_job import fetch_audio
+
+    calls = {}
+
+    class FakeYDL:
+        def __init__(self, opts):
+            calls["opts"] = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def extract_info(self, url, download=True):
+            (tmp_path / "yt-vidX.wav").write_bytes(b"x")
+            return {"ext": "m4a"}
+
+    fake = types.SimpleNamespace(YoutubeDL=FakeYDL, utils=types.SimpleNamespace(DownloadError=Exception))
+    monkeypatch.setitem(sys.modules, "yt_dlp", fake)
+    monkeypatch.setattr(embed_job, "_YT_MIN_INTERVAL", 0.0)
+    monkeypatch.setattr(embed_job, "_YT_MAX_ABR", 64)
+    fetch_audio("yt:vidX", tmp_path)
+    assert calls["opts"]["format"] == (
+        "bestaudio[abr<=64][ext=m4a]/bestaudio[abr<=64]/bestaudio[ext=m4a]/bestaudio"
+    )
+
+
 def test_youtube_floor_open():
     from pipeline.cascade import choose_source
     from pipeline.queues import PLATFORMS

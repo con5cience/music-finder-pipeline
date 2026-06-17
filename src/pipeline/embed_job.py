@@ -97,6 +97,24 @@ _YT_LOCK = __import__("threading").Lock()
 _YT_LAST = [0.0]
 _YT_MIN_INTERVAL = 8.0  # legacy-lore cadence: slow + jittered, NEVER bursty
 
+# Fetch-size cap (kbps). The embedder downsamples to ~24kHz mono, so YouTube's
+# 128-160kbps bestaudio is hugely over-spec; a <=cap audio stream (~48-80kbps)
+# cuts the per-track download ~2-3x at no embedding cost. Full track is still
+# fetched (RMS-peak windowing needs the whole song — windows.py).
+_YT_MAX_ABR = int(os.environ.get("PIPELINE_YT_MAX_ABR", "80"))
+
+
+def _yt_audio_format(max_abr: int) -> str:
+    """yt-dlp format selector: smallest ADEQUATE audio first, with a hard
+    fallback so a track whose formats carry no `abr` tag still extracts.
+    Cascade: m4a<=cap -> any audio<=cap -> m4a (bestaudio) -> any bestaudio.
+    m4a is preferred (AAC is efficient at low bitrate and the FFmpegExtractAudio
+    postprocessor transcodes it to the wav the decode path needs)."""
+    return (
+        f"bestaudio[abr<={max_abr}][ext=m4a]/bestaudio[abr<={max_abr}]"
+        f"/bestaudio[ext=m4a]/bestaudio"
+    )
+
 
 def _fetch_youtube(video_id: str, workdir: Path) -> str:
     """yt: extraction — the 2026-06-11 gate opening. Serialized process-wide
@@ -117,7 +135,7 @@ def _fetch_youtube(video_id: str, workdir: Path) -> str:
             time.sleep(wait)
         out = str(workdir / f"yt-{video_id}.%(ext)s")
         opts = {
-            "format": "bestaudio[ext=m4a]/bestaudio",
+            "format": _yt_audio_format(_YT_MAX_ABR),
             "outtmpl": out,
             "quiet": True,
             "no_warnings": True,
