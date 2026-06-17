@@ -108,6 +108,7 @@ publish = "python -m pipeline.publish"   # factory → serving DB (needs APP_DAT
 wave-seed = "python -m pipeline.wave_seeder"   # bounded-window mass seeding
 backup = "bash scripts/backup.sh"               # one-shot factory pg_dump (excludes fetch_cache data)
 ops = "bash scripts/ops.sh"                     # one-shot: review-poll + calibrate + publish + rebuild-vectors
+reindex-vectors = "bash scripts/reindex-vectors.sh"   # rebuild serving tag_vector HNSW (REQUIRED after a full rebuild-vectors; rebuild now auto-runs it)
 check.sequence = ["lint", "test"]
 setup.sequence = ["db-up", "migrate"]   # post-`uv sync` convenience (full: ./scripts/bootstrap.sh)
 
