@@ -200,7 +200,8 @@ def submit_artists(conn: Connection, *, target: str, limit: int = 5,
                    password: str | None = None, pace_s: float = 6.0,
                    url_owner=None) -> dict:
     """Submit staged payloads as new MB artists. Live: approved-only.
-    Test rehearsal: spot_check payloads allowed.
+    Test rehearsal: spot_check payloads allowed, and does NOT consume rows (no
+    ledger writes) so they stay available for the eventual live run.
 
     URL-checked create-anyway: before creating, each artist's URLs are checked
     against MB — if any URL already belongs to an existing artist the row is a
@@ -261,6 +262,10 @@ def submit_artists(conn: Connection, *, target: str, limit: int = 5,
                 f"from a browser logged into {host}. HTTP 401 -> the {host} account needs a "
                 "verified email address first (account/edit).")
     out = {"submitted": 0, "failed": 0, "duplicate": 0}
+    # A TEST rehearsal validates the flow but MUST NOT consume staged rows: only
+    # a live submission writes created_mbid/status back, so the rows remain
+    # available for the eventual live run.
+    persist = target == "live"
     for sid, artist_id, payload in rows:
         # URL-checked dedup: a URL already in MB means this artist already
         # exists there — link the existing entity, never create a duplicate.
@@ -271,10 +276,11 @@ def submit_artists(conn: Connection, *, target: str, limit: int = 5,
                 if existing:
                     break
         if existing:
-            conn.execute(
-                "UPDATE mb_submission SET status='duplicate', created_mbid=%s, target=%s "
-                "WHERE id=%s", (existing, target, sid))
-            conn.commit()
+            if persist:
+                conn.execute(
+                    "UPDATE mb_submission SET status='duplicate', created_mbid=%s, target=%s "
+                    "WHERE id=%s", (existing, target, sid))
+                conn.commit()
             out["duplicate"] += 1
             print(f"duplicate (URL already in MB) for {artist_id} -> {existing}")
             continue
@@ -284,16 +290,19 @@ def submit_artists(conn: Connection, *, target: str, limit: int = 5,
                 edit_note=("crates.ltd underground-discovery bot — announced and "
                            "blessed on the community forum; full analysis + human "
                            "spot-check behind every submission."))
-            conn.execute(
-                "UPDATE mb_submission SET created_mbid = %s, target = %s, status = 'submitted' "
-                "WHERE id = %s", (mbid, target, sid))
+            if persist:
+                conn.execute(
+                    "UPDATE mb_submission SET created_mbid = %s, target = %s, status = 'submitted' "
+                    "WHERE id = %s", (mbid, target, sid))
             out["submitted"] += 1
         except RuntimeError as exc:
-            conn.execute(
-                "UPDATE mb_submission SET status = 'failed', target = %s WHERE id = %s",
-                (target, sid))
+            if persist:
+                conn.execute(
+                    "UPDATE mb_submission SET status = 'failed', target = %s WHERE id = %s",
+                    (target, sid))
             print(f"submission failed for {artist_id}: {exc}")
             out["failed"] += 1
-        conn.commit()
+        if persist:
+            conn.commit()
         time.sleep(pace_s)  # bot-account pacing: slower than any human reviewer
     return out

@@ -109,19 +109,31 @@ def test_edit_form_detected_without_csrf():
     assert _edit_form_present('Unauthorized request - verify your email') is False  # 401
 
 
-def test_rehearsal_consumes_spot_check_but_live_requires_approved(conn, link_types):
-    a = _staged(conn, "stagedband")
+def test_rehearsal_does_not_consume_rows(conn, link_types):
+    """A TEST rehearsal validates the flow but must NOT consume the staged row —
+    created_mbid/status stay pristine so the row is still available for live.
+    Live still requires an approved payload (spot_check is not enough)."""
+    a = _staged(conn, "stagedband")  # spot_check
     mb = FakeMB()
     out = submit_artists(conn, target="live", fetch=mb, limit=10, url_owner=lambda *a, **k: None)
     assert out["submitted"] == 0  # spot_check is NOT enough for live
     out = submit_artists(conn, target="test", fetch=mb, limit=10, url_owner=lambda *a, **k: None)
-    assert out["submitted"] == 1  # rehearsal uses staged payloads
+    assert out["submitted"] == 1  # the rehearsal created on the (mock) server...
+    row = conn.execute(
+        "SELECT status, created_mbid FROM mb_submission WHERE artist_id=%s", (a,)).fetchone()
+    assert row == ("spot_check", None)  # ...but the staged row is untouched (not consumed)
+
+
+def test_live_consumes_and_records(conn, link_types):
+    """A LIVE submission DOES consume the row: created_mbid + status='submitted'."""
+    a = _staged(conn, "liveband", status="approved")
+    out = submit_artists(conn, target="live", fetch=FakeMB(), limit=10, pace_s=0,
+                         url_owner=lambda *a, **k: None)
+    assert out["submitted"] == 1
     row = conn.execute(
         "SELECT created_mbid::text, target, status FROM mb_submission WHERE artist_id=%s", (a,)
     ).fetchone()
-    assert row == (MBID_NEW, "test", "submitted")
-    # the TEST-world mbid must never attach to our artist
-    assert conn.execute("SELECT mbid FROM artist WHERE id=%s", (a,)).fetchone()[0] is None
+    assert row == (MBID_NEW, "live", "submitted")
 
 
 def test_integrity_flags_block_at_the_door(conn, link_types):
@@ -144,7 +156,7 @@ def test_rejected_create_marks_failed_and_continues(conn, link_types):
                 return 200, {}, b"validation error page"  # no redirect = rejected
             return super().__call__(url, data)
 
-    out = submit_artists(conn, target="test", fetch=Rejecting(), limit=10, pace_s=0,
+    out = submit_artists(conn, target="live", fetch=Rejecting(), limit=10, pace_s=0,
                          url_owner=lambda *a, **k: None)
     assert out["submitted"] == 1
     assert out["failed"] == 1
@@ -216,7 +228,7 @@ def test_submit_artists_skips_url_duplicates(conn, link_types):
                 raise AssertionError("create must not run for a URL-duplicate")
             return super().__call__(url, data)
 
-    out = submit_artists(conn, target="test", fetch=NoCreate(), limit=10, pace_s=0,
+    out = submit_artists(conn, target="live", fetch=NoCreate(), limit=10, pace_s=0,
                          url_owner=lambda target, u: existing)
     assert out["duplicate"] == 1 and out["submitted"] == 0
     row = conn.execute(
