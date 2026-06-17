@@ -21,8 +21,10 @@ the dump is the source of truth, never hardcoded ids.
 
 from __future__ import annotations
 
+import json
 import re
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from http.cookiejar import CookieJar
@@ -33,6 +35,26 @@ from pipeline.mb_submit import UA, _env_fallback, base_for
 
 _CSRF_RE = re.compile(r'name="csrf_token"[^>]*value="([^"]+)"')
 _MBID_RE = re.compile(r"/artist/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+# The required name input is our authenticated-and-editable signal: modern MB
+# forms carry NO csrf_token field (verified against the live /artist/create form
+# 2026-06-17), so we must detect the edit form itself, not a csrf token, to know
+# the session is usable. An anonymous session 302s away; an unverified-email
+# account 401s — neither renders this field.
+_FORM_RE = re.compile(r'name="edit-artist\.name"')
+
+
+def _edit_form_present(html: str) -> bool:
+    return bool(_FORM_RE.search(html))
+
+
+def _is_duplicate_page(html: str) -> bool:
+    # A name collision re-renders the create form (HTTP 200) with a "possible
+    # duplicates" panel and demands a disambiguation comment before it will
+    # create. (The URL was already cleared as unique upstream, so this is a
+    # same-name-different-artist case, not a true duplicate.)
+    return "possible-duplicates" in html
+
+
 # platform -> mb link_type NAME (resolved to ids via mb_raw.link_type)
 _URL_REL_NAMES = {"bandcamp": "bandcamp", "soundcloud": "soundcloud",
                   "youtube": "youtube", "deezer": "free streaming"}
@@ -101,6 +123,42 @@ def link_type_ids(conn: Connection) -> dict[str, int]:
     return dict(rows)
 
 
+def mb_artist_url_owner(target: str, url: str, *, pace_s: float = 1.0) -> str | None:
+    """MBID of an existing MB artist already linked to `url`, else None.
+
+    The URL is the reliable duplicate discriminator: if MB already has this
+    bandcamp/streaming URL attached to an artist, OUR artist IS that artist —
+    we link the existing entity rather than create a second one in the commons.
+    A 404 means MB has never seen the URL (genuinely new artist). Read via ws/2
+    (not the website), which is not behind the browser-verification wall."""
+    base = base_for(target)
+    q = (f"{base}/ws/2/url?resource={urllib.parse.quote(url, safe='')}"
+         "&inc=artist-rels&fmt=json")
+    req = urllib.request.Request(q, headers={"User-Agent": UA})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = json.load(r)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None  # URL unknown to MB
+        raise
+    finally:
+        time.sleep(pace_s)  # ws/2 anonymous rate limit (~1 req/s)
+    for rel in data.get("relations", []):
+        artist = rel.get("artist") or {}
+        if artist.get("id"):
+            return artist["id"]
+    return None
+
+
+def _disambiguation(payload: dict) -> str:
+    """A name collision requires a disambiguation comment. Location is the most
+    natural human discriminator for same-named artists; fall back to a minimal
+    honest descriptor (the human approval gate refines weak ones)."""
+    area = (payload.get("area_hint") or "").strip()
+    return area or "Bandcamp artist"
+
+
 def create_artist(fetch, conn: Connection, target: str, payload: dict,
                   *, edit_note: str) -> str:
     base = base_for(target)
@@ -123,6 +181,12 @@ def create_artist(fetch, conn: Connection, target: str, payload: dict,
         form[f"edit-artist.url.{n}.link_type_id"] = str(lt[name])
         n += 1
     status, headers, body = fetch(f"{base}/artist/create", form)
+    # Name collision: MB re-renders (HTTP 200, possible-duplicates) and requires
+    # a disambiguation. The URL was already cleared as unique upstream, so this
+    # is a distinct same-named artist — supply a disambiguation and create anyway.
+    if status == 200 and _is_duplicate_page(body.decode("utf-8", "replace")):
+        form["edit-artist.comment"] = _disambiguation(payload)
+        status, headers, body = fetch(f"{base}/artist/create", form)
     if status not in (302, 303):
         raise RuntimeError(f"artist create rejected (HTTP {status}): {body[:300]!r}")
     m = _MBID_RE.search(headers.get("Location", "") or headers.get("location", ""))
@@ -133,9 +197,17 @@ def create_artist(fetch, conn: Connection, target: str, payload: dict,
 
 def submit_artists(conn: Connection, *, target: str, limit: int = 5,
                    fetch=None, username: str | None = None,
-                   password: str | None = None, pace_s: float = 6.0) -> dict:
+                   password: str | None = None, pace_s: float = 6.0,
+                   url_owner=None) -> dict:
     """Submit staged payloads as new MB artists. Live: approved-only.
-    Test rehearsal: spot_check payloads allowed."""
+    Test rehearsal: spot_check payloads allowed.
+
+    URL-checked create-anyway: before creating, each artist's URLs are checked
+    against MB — if any URL already belongs to an existing artist the row is a
+    true duplicate (recorded 'duplicate' with the existing MBID to link, never
+    re-created). Name-only collisions are NOT duplicates: create_artist supplies
+    a disambiguation and creates anyway. `url_owner` is injectable for tests."""
+    url_owner = url_owner or mb_artist_url_owner
     statuses = ("approved",) if target == "live" else ("approved", "spot_check")
     rows = conn.execute(
         """
@@ -182,13 +254,30 @@ def submit_artists(conn: Connection, *, target: str, limit: int = 5,
         # every create fails with a confusing "no MBID in redirect".
         sess_var = "MB_BOT_SESSION_TEST" if target == "test" else "MB_BOT_SESSION"
         st, _h, body = fetch(f"{base}/artist/create")
-        if st != 200 or not _CSRF_RE.search(body.decode("utf-8", "replace")):
+        if st != 200 or not _edit_form_present(body.decode("utf-8", "replace")):
             raise SystemExit(
-                f"MB session not authenticated (GET /artist/create -> HTTP {st}, no edit form). "
-                f"Log into {host} in a browser and set {sess_var} to the "
-                "musicbrainz_server_session cookie value.")
-    out = {"submitted": 0, "failed": 0}
+                f"MB session not usable for edits (GET /artist/create -> HTTP {st}, no edit form). "
+                f"HTTP 302 -> {sess_var} is anonymous/expired: re-copy musicbrainz_server_session "
+                f"from a browser logged into {host}. HTTP 401 -> the {host} account needs a "
+                "verified email address first (account/edit).")
+    out = {"submitted": 0, "failed": 0, "duplicate": 0}
     for sid, artist_id, payload in rows:
+        # URL-checked dedup: a URL already in MB means this artist already
+        # exists there — link the existing entity, never create a duplicate.
+        existing = None
+        for u in payload.get("urls", []):
+            if u.get("url"):
+                existing = url_owner(target, u["url"])
+                if existing:
+                    break
+        if existing:
+            conn.execute(
+                "UPDATE mb_submission SET status='duplicate', created_mbid=%s, target=%s "
+                "WHERE id=%s", (existing, target, sid))
+            conn.commit()
+            out["duplicate"] += 1
+            print(f"duplicate (URL already in MB) for {artist_id} -> {existing}")
+            continue
         try:
             mbid = create_artist(
                 fetch, conn, target, payload,
