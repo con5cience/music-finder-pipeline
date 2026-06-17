@@ -21,7 +21,6 @@ the dump is the source of truth, never hardcoded ids.
 
 from __future__ import annotations
 
-import json
 import re
 import time
 import urllib.parse
@@ -30,7 +29,7 @@ from http.cookiejar import CookieJar
 
 from psycopg import Connection
 
-from pipeline.mb_submit import UA, base_for
+from pipeline.mb_submit import UA, _env_fallback, base_for
 
 _CSRF_RE = re.compile(r'name="csrf_token"[^>]*value="([^"]+)"')
 _MBID_RE = re.compile(r"/artist/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
@@ -75,8 +74,13 @@ def login(fetch, target: str, username: str, password: str) -> None:
 
 
 def link_type_ids(conn: Connection) -> dict[str, int]:
+    # MB reuses a link-type NAME across entity types (e.g. 'bandcamp' exists as
+    # artist-url 718, label-url 719, genre-url 1092). We attach URLs to ARTISTS,
+    # so filter to the artist<->url link type — matching by name alone picked an
+    # arbitrary (often label/genre) id and would mis-type or reject the link.
     rows = conn.execute(
-        "SELECT name, id FROM mb_raw.link_type WHERE name = ANY(%s)",
+        "SELECT name, id FROM mb_raw.link_type WHERE name = ANY(%s) "
+        "AND entity_type0 = 'artist' AND entity_type1 = 'url'",
         (list(set(_URL_REL_NAMES.values())),),
     ).fetchall()
     return dict(rows)
@@ -117,8 +121,6 @@ def submit_artists(conn: Connection, *, target: str, limit: int = 5,
                    password: str | None = None, pace_s: float = 6.0) -> dict:
     """Submit staged payloads as new MB artists. Live: approved-only.
     Test rehearsal: spot_check payloads allowed."""
-    import os
-
     statuses = ("approved",) if target == "live" else ("approved", "spot_check")
     rows = conn.execute(
         """
@@ -135,11 +137,19 @@ def submit_artists(conn: Connection, *, target: str, limit: int = 5,
         return {"submitted": 0}
     if fetch is None:
         fetch = default_transport()
-        username = username or os.environ.get("MB_BOT_USER")
-        password = password or os.environ.get("MB_BOT_PASSWORD")
+        # test and live are separate MB servers/accounts. Convention: test uses
+        # the _TEST-suffixed creds; production (live) uses the bare vars.
+        if target == "test":
+            username = username or _env_fallback("MB_BOT_USER_TEST")
+            password = password or _env_fallback("MB_BOT_PASSWORD_TEST")
+            hint = "MB_BOT_USER_TEST / MB_BOT_PASSWORD_TEST"
+        else:
+            username = username or _env_fallback("MB_BOT_USER")
+            password = password or _env_fallback("MB_BOT_PASSWORD")
+            hint = "MB_BOT_USER / MB_BOT_PASSWORD"
         if not username or not password:
-            raise SystemExit("MB_BOT_USER / MB_BOT_PASSWORD not set — the edit "
-                             "system needs the bot's website session, not OAuth")
+            raise SystemExit(f"{hint} not set — the edit system needs the bot's website "
+                             "session, not OAuth")
         login(fetch, target, username, password)
     out = {"submitted": 0, "failed": 0}
     for sid, artist_id, payload in rows:
