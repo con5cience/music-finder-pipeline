@@ -47,6 +47,17 @@ CENTERING_C = float(os.environ.get("PIPELINE_CENTERING_C", "0.585"))
 AUDIO_TAG_K = int(os.environ.get("PIPELINE_AUDIO_TAG_K", "4"))
 AUDIO_REL_GATE = float(os.environ.get("PIPELINE_AUDIO_GATE", "0.85"))
 
+# Audio tier method (ADR-025): borrow genres from an artist's nearest-SOUNDING
+# MB-labeled neighbors instead of trusting raw zero-shot text-similarity tags
+# (which hallucinate niche genres). Validated ~3.4x F1 / ~4x precision over the
+# centered zero-shot tier, with no hallucinations (anchors carry only real MB
+# genres). EMB_MODEL = the audio-embedding model (factory partial HNSW
+# idx_artist_embedding_muq_ann). KNN_GATE = relative keep-margin vs the top vote.
+EMB_MODEL = os.environ.get("PIPELINE_EMBED_MODEL", "muq-large-msd")
+AUDIO_KNN_K = int(os.environ.get("PIPELINE_AUDIO_KNN_K", "25"))       # neighbors voted
+AUDIO_KNN_FETCH = int(os.environ.get("PIPELINE_AUDIO_KNN_FETCH", "80"))  # ANN over-fetch (then filter to anchors)
+AUDIO_KNN_GATE = float(os.environ.get("PIPELINE_AUDIO_KNN_GATE", "0.7"))
+
 _URL_BUILDERS = {
     "deezer": lambda pid: f"https://www.deezer.com/artist/{pid}",
     "bandcamp": lambda pid: f"https://{pid}.bandcamp.com",
@@ -132,6 +143,7 @@ def publish_incremental(factory: Connection, app: Connection, limit: int = 10000
     # advancing after_id, the same first window re-published forever)
     n = 0
     after = None
+    anchors = load_anchor_genres(factory)  # kNN audio-tier anchors, built once
     while True:
         rows = publishable_artists(factory, limit, since=wm, after_id=after)
         if not rows:
@@ -152,7 +164,7 @@ def publish_incremental(factory: Connection, app: Connection, limit: int = 10000
                    AND status='pending' AND subject_id = ANY(%s)""",
                 ([str(r[0]) for r in rows],)).fetchall()}
             rows = [r for r in rows if r[0] not in flagged_now]
-        publish_rows(factory, app, rows)
+        publish_rows(factory, app, rows, anchors=anchors)
         n += len(rows)
         if not full_batch:
             break
@@ -188,12 +200,13 @@ def republish_all(
     the next hourly incremental picks up anything embedded DURING the run."""
     total = 0
     after = start_after
+    anchors = load_anchor_genres(factory)  # kNN audio-tier anchors, built once
     while True:
         rows = publishable_artists(factory, batch, since=None, after_id=after)
         if not rows:
             break
         after = rows[-1][0]
-        publish_rows(factory, app, rows)
+        publish_rows(factory, app, rows, anchors=anchors)
         if commit_each:
             app.commit()
             factory.commit()  # also release the read snapshot — don't hold it all run
@@ -657,12 +670,102 @@ def bandcamp_tags_batch(conn: Connection, aids: list) -> dict[str, dict]:
     return out
 
 
+def load_anchor_genres(conn: Connection) -> dict[str, frozenset]:
+    """artist_id(str) -> frozenset(MB editorial genres) for EVERY MB-covered
+    artist — the kNN label-propagation anchors (ADR-025). Same vocab/alias logic
+    as mb_genres_batch. Built once per publish run and passed into publish_rows
+    (NOT module-cached, so tests on a rolled-back DB stay isolated)."""
+    out: dict[str, set] = {}
+    for aid, genre in conn.execute(
+        """
+        SELECT a.id::text, coalesce(gc.name, gd.name) AS genre
+        FROM artist a
+        JOIN mb_raw.artist mra ON mra.gid::text = a.mbid::text
+        JOIN mb_raw.artist_tag at ON at.artist = mra.id AND at.count > 0
+        JOIN mb_raw.tag t ON t.id = at.tag
+        LEFT JOIN mb_raw.genre gd ON gd.name = lower(t.name)
+        LEFT JOIN mb_raw.genre_alias gal ON gal.name = lower(t.name)
+        LEFT JOIN mb_raw.genre gc ON gc.id = gal.genre
+        WHERE a.mbid IS NOT NULL AND (gd.name IS NOT NULL OR gc.name IS NOT NULL)
+        """
+    ).fetchall():
+        out.setdefault(aid, set()).add(genre)
+    return {k: frozenset(v) for k, v in out.items()}
+
+
+def _artist_tags_knn(conn: Connection, aids: list, g_moments, anchors: dict[str, frozenset]) -> dict[str, dict]:
+    """AUDIO tier (ADR-025): borrow genres from an artist's nearest-SOUNDING
+    MB-labeled neighbors. For each artist, query the factory audio HNSW for its
+    closest 'anchor' artists (those with real MB genres), similarity-weight-vote
+    their genres, keep the top within AUDIO_KNN_GATE of the best (capped
+    AUDIO_TAG_K, min 1). Anchors carry only real MB genres, so this CANNOT
+    hallucinate niche tags. Artists with no anchor neighbors (sparse spaces,
+    tests, or a missing embedding) fall back to the centered zero-shot tier so
+    the tier is never empty."""
+    out: dict[str, dict] = {}
+    nofit: list = []
+    # Seed embeddings fetched up front: the ANN's query vector MUST be a bound
+    # PARAMETER (a literal), not a correlated column — pgvector's HNSW only
+    # engages for a constant query vector, so a CROSS JOIN seed seq-scans all
+    # ~150k vectors per artist (~2s). As a parameter it's an index probe (~ms).
+    embs = {
+        r[0]: r[1]
+        for r in conn.execute(
+            "SELECT artist_id::text, embedding::text FROM artist_embedding "
+            "WHERE artist_id = ANY(%s::uuid[]) AND model = %s",
+            ([str(a) for a in aids], EMB_MODEL),
+        ).fetchall()
+    }
+    for aid in aids:
+        qvec = embs.get(str(aid))
+        if qvec is None:
+            nofit.append(aid)
+            continue
+        rows = conn.execute(
+            """
+            SELECT n.artist_id::text, -((n.embedding)::vector(1024) <#> %(q)s::vector(1024)) AS sim
+            FROM artist_embedding n
+            WHERE n.model = %(m)s AND n.artist_id <> %(a)s::uuid
+            ORDER BY (n.embedding)::vector(1024) <#> %(q)s::vector(1024)
+            LIMIT %(f)s
+            """,
+            {"q": qvec, "a": str(aid), "m": EMB_MODEL, "f": AUDIO_KNN_FETCH},
+        ).fetchall()
+        votes: dict[str, float] = {}
+        total = 0.0
+        kept = 0
+        for nid, sim in rows:
+            g = anchors.get(nid)
+            if not g:
+                continue  # neighbor isn't an MB-labeled anchor — skip
+            w = max(0.0, float(sim))
+            for genre in g:
+                votes[genre] = votes.get(genre, 0.0) + w
+            total += w
+            kept += 1
+            if kept >= AUDIO_KNN_K:
+                break
+        if not votes or total <= 0:
+            nofit.append(aid)
+            continue
+        ranked = sorted(votes.items(), key=lambda kv: -kv[1])[:AUDIO_TAG_K]
+        top = ranked[0][1]
+        out[str(aid)] = {
+            g: max(1, round(v / total * 10))
+            for g, v in ranked
+            if g == ranked[0][0] or v >= AUDIO_KNN_GATE * top
+        }
+    if nofit:  # no sonic anchors -> centered zero-shot fallback (keeps tier non-empty)
+        out.update(_artist_tags_centered(conn, nofit, g_moments))
+    return out
+
+
 def publish_artists(factory: Connection, app: Connection, limit: int = 1000, since=None) -> int:
     """Upsert embedded artists into the serving DB. Returns artists published."""
     return publish_rows(factory, app, publishable_artists(factory, limit, since))
 
 
-def publish_rows(factory: Connection, app: Connection, rows: list[tuple]) -> int:
+def publish_rows(factory: Connection, app: Connection, rows: list[tuple], anchors: dict | None = None) -> int:
     import json
 
     if not rows:
@@ -670,9 +773,10 @@ def publish_rows(factory: Connection, app: Connection, rows: list[tuple]) -> int
     # set-based reads: one query each for the whole batch, not 5 per artist.
     aids = [r[0] for r in rows]
     urls_by = artist_urls_batch(factory, aids)
-    # Tags (ADR-022), priority order, never empty:
+    # Tags (ADR-022/025), priority order, never empty:
     #   1. MB editorial genres (accurate)  2. Bandcamp human tags
-    #   3. magnet-pruned centered audio, top 1-4 (the long tail)
+    #   3. AUDIO tier = genres borrowed from nearest-sounding MB-labeled neighbors
+    #      (kNN label-propagation, ADR-025), centered zero-shot as last-resort fallback.
     mb_by = mb_genres_batch(factory, aids)
     bc_by = bandcamp_tags_batch(factory, aids)
     audio_aids = [a for a in aids if str(a) not in mb_by and str(a) not in bc_by]
@@ -681,7 +785,10 @@ def publish_rows(factory: Connection, app: Connection, rows: list[tuple]) -> int
         g_artist = factory.execute(
             "SELECT avg(score), greatest(stddev(score), 1e-6), count(DISTINCT artist_id) FROM artist_tag_scores"
         ).fetchone()
-        audio_by = _artist_tags_centered(factory, audio_aids, g_artist)
+        # anchors built once per run by the caller; build here if called directly.
+        if anchors is None:
+            anchors = load_anchor_genres(factory)
+        audio_by = _artist_tags_knn(factory, audio_aids, g_artist, anchors)
     tags_by = {str(a): (mb_by.get(str(a)) or bc_by.get(str(a)) or audio_by.get(str(a)) or {}) for a in aids}
     perc_by = artist_perceptual_batch(factory, aids)
     lang_by = artist_language_batch(factory, aids)

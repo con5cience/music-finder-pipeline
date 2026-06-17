@@ -619,6 +619,39 @@ def test_publish_prefers_mb_genres_over_audio(conn):
     assert 'zz-mbgenre' in tags and 'zz-audiotag' not in tags
 
 
+def test_audio_tier_knn_borrows_neighbor_genres(conn):
+    """ADR-025 audio tier: an artist with no MB/Bandcamp tags borrows the MB
+    genres of its nearest-SOUNDING MB-labeled anchor, not a distant one."""
+    from pipeline.publish import _artist_tags_knn, load_anchor_genres
+
+    def vec(i):  # 1024-dim unit vector pointing along axis i
+        return "[" + ",".join("1" if k == i else "0" for k in range(1024)) + "]"
+
+    # two MB-labeled anchors with different genres + orthogonal embeddings
+    conn.execute(
+        "INSERT INTO mb_raw.genre (id, gid, name) VALUES "
+        "(972001,'00000000-feed-4bad-9bad-00000000e201','zz-knn-near'),"
+        "(972002,'00000000-feed-4bad-9bad-00000000e202','zz-knn-far')"
+    )
+    conn.execute("INSERT INTO mb_raw.tag (id, name, ref_count) VALUES (982001,'zz-knn-near',1),(982002,'zz-knn-far',1)")
+    near_mb = '00000000-feed-4bad-9bad-00000000a901'
+    far_mb = '00000000-feed-4bad-9bad-00000000a902'
+    conn.execute("INSERT INTO mb_raw.artist (id, gid, name, sort_name) VALUES (992001,%s,'NEAR','NEAR'),(992002,%s,'FAR','FAR')", (near_mb, far_mb))
+    conn.execute("INSERT INTO mb_raw.artist_tag (artist, tag, count) VALUES (992001,982001,5),(992002,982002,5)")
+    near = conn.execute("INSERT INTO artist (display_name, mbid, embedding_source) VALUES ('NEAR',%s,'bandcamp') RETURNING id", (near_mb,)).fetchone()[0]
+    far = conn.execute("INSERT INTO artist (display_name, mbid, embedding_source) VALUES ('FAR',%s,'bandcamp') RETURNING id", (far_mb,)).fetchone()[0]
+    target = conn.execute("INSERT INTO artist (display_name, embedding_source) VALUES ('TARGET','bandcamp') RETURNING id").fetchone()[0]
+    for aid, v in ((near, vec(0)), (far, vec(1)), (target, vec(0))):  # target aligns with NEAR (axis 0)
+        conn.execute("INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) VALUES (%s,'muq-large-msd',1024,%s,4,0.9)", (aid, v))
+
+    anchors = load_anchor_genres(conn)
+    assert str(near) in anchors and str(target) not in anchors  # only MB-labeled artists are anchors
+    g = conn.execute("SELECT avg(score),greatest(stddev(score),1e-6),count(DISTINCT artist_id) FROM artist_tag_scores").fetchone()
+    res = _artist_tags_knn(conn, [target], g, anchors).get(str(target), {})
+    assert 'zz-knn-near' in res       # borrowed from the sonically-nearest anchor
+    assert 'zz-knn-far' not in res    # the orthogonal anchor is gated out
+
+
 def test_publish_uses_bandcamp_tags_when_no_mb_genres(conn):
     """Middle tier: artist with no MB genres but human Bandcamp tags gets those
     tags (verbatim) — NOT the audio tier — until MB later clobbers them."""
