@@ -111,3 +111,35 @@ def test_submit_tags_leads_with_bandcamp_tags(conn, monkeypatch):
     body = captured["body"]
     assert "zz-bandcamptag" in body and "zz-audiotag" in body
     assert body.index("zz-bandcamptag") < body.index("zz-audiotag")  # bandcamp leads
+
+
+def test_eligible_tag_rows_excludes_garbage_magnets_and_nan(conn):
+    """Contribution-quality gate (2026-06-17 rehearsal fix): never contribute a
+    guess. Zero/NaN-score and magnet-blocklisted tags are dropped; an artist with
+    no clean signal is SKIPPED entirely (not submitted)."""
+    import math
+
+    import pipeline.mb_submit as mb
+
+    conn.execute("INSERT INTO tag_audio_blocklist (tag, audio_pct, mb_n) VALUES ('zz-magnet', 12.0, 3)")
+    # A: only a 0-score audio tag, no Bandcamp -> nothing clean -> SKIPPED
+    zero_mbid = "00000000-feed-4bad-9bad-00000000af11"
+    a0 = conn.execute(
+        "INSERT INTO artist (display_name, mbid, embedding_source) VALUES ('Zero', %s, 'bandcamp') RETURNING id",
+        (zero_mbid,),
+    ).fetchone()[0]
+    conn.execute("INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES (%s,'zz-zero',0.0,'muq-mulan-large')", (a0,))
+    # B: a magnet (positive), a NaN tag, and one clean positive tag -> only clean kept
+    mag_mbid = "00000000-feed-4bad-9bad-00000000af12"
+    b = conn.execute(
+        "INSERT INTO artist (display_name, mbid, embedding_source) VALUES ('Mag', %s, 'bandcamp') RETURNING id",
+        (mag_mbid,),
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES "
+        "(%s,'zz-magnet',0.9,'muq-mulan-large'),(%s,'zz-nan',%s,'muq-mulan-large'),(%s,'zz-clean',0.8,'muq-mulan-large')",
+        (b, b, math.nan, b),
+    )
+    by = {mbid: tags for _aid, mbid, tags in mb.eligible_tag_rows(conn, "test", 50)}
+    assert zero_mbid not in by                 # zero-score-only artist skipped (no guess contributed)
+    assert by.get(mag_mbid) == ["zz-clean"]    # magnet + NaN dropped, only the clean positive tag kept

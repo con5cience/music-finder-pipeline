@@ -219,47 +219,75 @@ def queue_eligible(conn: Connection, limit: int = 50) -> int:
     return queued
 
 
-def submit_tags(conn: Connection, limit: int = 20, *, target: str = "live") -> int:
-    """Phase 2 (LIVE API): upvote our calibrated genre tags on artists that
-    HAVE mbids — the contribution we can make today, fully programmatic."""
-    import time
-    import xml.sax.saxutils as sx
+def eligible_tag_rows(conn: Connection, target: str, limit: int) -> list[tuple]:
+    """Artists to contribute tags for, with their CLEAN merged tag list.
 
+    Contribution-quality gate (the test rehearsal on 2026-06-17 caught the old
+    code submitting garbage): unlike publish, a contribution must NEVER include a
+    guess — so audio tags are filtered to POSITIVE, non-NaN, non-magnet-blocklist
+    scores (no min-1 floor), Bandcamp human tags lead, and an artist with nothing
+    clean to add is SKIPPED entirely (not submitted, not marked — retried later if
+    it earns clean tags). Returns [(artist_id, mbid, [tags<=5])] for non-empty
+    contributions only. Pure read — testable without the network."""
+    model_row = conn.execute("SELECT model FROM artist_tag_scores LIMIT 1").fetchone()
+    model = model_row[0] if model_row else None
     rows = conn.execute(
         """
         SELECT a.id, a.mbid::text,
-               (array_agg(ats.tag ORDER BY ats.score DESC))[1:5] AS audio_tags,
-               -- bc_candidate.tags = the human-applied Bandcamp tags (genre col
-               -- is a numeric artifact, unused); union of all candidates' tags.
+               coalesce((SELECT array_agg(s.tag ORDER BY s.score DESC) FROM (
+                   SELECT ats.tag, ats.score FROM artist_tag_scores ats
+                   WHERE ats.artist_id = a.id AND ats.model = %(model)s
+                     AND ats.score > 0 AND ats.score != 'NaN'::real
+                     AND NOT EXISTS (SELECT 1 FROM tag_audio_blocklist bl WHERE bl.tag = ats.tag)
+                   ORDER BY ats.score DESC LIMIT 5) s), '{}') AS audio_tags,
                coalesce((SELECT array_agg(DISTINCT lower(bt))
                          FROM bc_candidate bc, unnest(bc.tags) bt
                          WHERE bc.artist_id = a.id AND bt IS NOT NULL AND bt <> ''),
                         '{}') AS bc_tags
         FROM artist a
-        JOIN artist_tag_scores ats ON ats.artist_id = a.id AND ats.model = (
-            SELECT model FROM artist_tag_scores LIMIT 1)
         WHERE a.mbid IS NOT NULL AND a.embedding_source IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM mb_tag_submission ts
-                          WHERE ts.artist_id = a.id AND ts.target = %s)
-        GROUP BY a.id, a.mbid ORDER BY a.id LIMIT %s
+                          WHERE ts.artist_id = a.id AND ts.target = %(target)s)
+          AND ( EXISTS (SELECT 1 FROM artist_tag_scores ats
+                        WHERE ats.artist_id = a.id AND ats.model = %(model)s
+                          AND ats.score > 0 AND ats.score != 'NaN'::real
+                          AND NOT EXISTS (SELECT 1 FROM tag_audio_blocklist bl WHERE bl.tag = ats.tag))
+             OR EXISTS (SELECT 1 FROM bc_candidate bc, unnest(bc.tags) bt
+                        WHERE bc.artist_id = a.id AND bt IS NOT NULL AND bt <> '') )
+        ORDER BY a.id LIMIT %(limit)s
         """,
-        (target, limit),
+        {"model": model, "target": target, "limit": limit},
     ).fetchall()
-    if not rows:
-        return 0
-    tok = access_token(conn, target=target)
-    parts = ['<?xml version="1.0" encoding="UTF-8"?>',
-             '<metadata xmlns="http://musicbrainz.org/ns/mmd-2.0#"><artist-list>']
-    for _aid, mbid, audio_tags, bc_tags in rows:
-        # Bandcamp's human-applied tags first (higher quality), then our audio
-        # tags fill the rest; dedup case-insensitively, cap at 5.
+    out: list[tuple] = []
+    for aid, mbid, audio_tags, bc_tags in rows:
+        # Bandcamp human tags lead (higher quality), audio fills the rest;
+        # dedup case-insensitively, cap at 5.
         merged, seen = [], set()
         for t in [*(bc_tags or []), *(audio_tags or [])]:
             if t and t.lower() not in seen:
                 seen.add(t.lower())
                 merged.append(t)
+        if merged:
+            out.append((aid, mbid, merged[:5]))
+    return out
+
+
+def submit_tags(conn: Connection, limit: int = 20, *, target: str = "live") -> int:
+    """Phase 2 (LIVE API): upvote our CLEAN genre tags on artists that HAVE mbids
+    — the contribution we can make today, fully programmatic. See
+    eligible_tag_rows for the contribution-quality gate."""
+    import time
+    import xml.sax.saxutils as sx
+
+    rows = eligible_tag_rows(conn, target, limit)
+    if not rows:
+        return 0
+    tok = access_token(conn, target=target)
+    parts = ['<?xml version="1.0" encoding="UTF-8"?>',
+             '<metadata xmlns="http://musicbrainz.org/ns/mmd-2.0#"><artist-list>']
+    for _aid, mbid, merged in rows:
         parts.append(f'<artist id="{mbid}"><user-tag-list>')
-        parts.extend(f"<user-tag><name>{sx.escape(t)}</name></user-tag>" for t in merged[:5])
+        parts.extend(f"<user-tag><name>{sx.escape(t)}</name></user-tag>" for t in merged)
         parts.append("</user-tag-list></artist>")
     parts.append("</artist-list></metadata>")
     req = urllib.request.Request(
@@ -274,7 +302,7 @@ def submit_tags(conn: Connection, limit: int = 20, *, target: str = "live") -> i
             r.read()
     except urllib.error.HTTPError as e:
         raise SystemExit(f"MB tag submission failed ({e.code}): {e.read()[:200]!r}") from e
-    for aid, _mbid, _audio, _bc in rows:
+    for aid, _mbid, _merged in rows:
         conn.execute(
             "INSERT INTO mb_tag_submission (artist_id, target) VALUES (%s, %s) ON CONFLICT DO NOTHING",
             (aid, target))
