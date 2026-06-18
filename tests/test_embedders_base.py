@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 import struct
+import threading
+import time
 import wave
 
 import pytest
@@ -44,6 +46,49 @@ def test_load_audio_mono_resamples(tmp_path):
     wav = load_audio_mono(p, 48000)
     assert wav.ndim == 1
     assert wav.shape[0] > 8000  # ~0.2s resampled to 48 kHz
+
+
+class _ConcurrencyProbe(AudioEmbedder):
+    """Records whether two threads are ever inside _features at once."""
+
+    name = "probe"
+    sample_rate = 16000
+
+    def __init__(self) -> None:
+        super().__init__(device="cpu")
+        self._counter_lock = threading.Lock()
+        self.inside = 0
+        self.max_inside = 0
+
+    def _load(self) -> None:
+        pass
+
+    def _features(self, wavs: list[torch.Tensor]) -> torch.Tensor:
+        with self._counter_lock:
+            self.inside += 1
+            self.max_inside = max(self.max_inside, self.inside)
+        time.sleep(0.05)  # hold the forward open so an unsynchronized caller overlaps
+        with self._counter_lock:
+            self.inside -= 1
+        return torch.ones(len(wavs), 4)
+
+
+def test_features_serialized_across_threads(tmp_path):
+    # MuQ's conformer rotary cache is shared mutable state on the singleton model
+    # (one embedder per worker, GPU activities run via asyncio.to_thread at
+    # concurrency 2-3). Concurrent _features calls race that cache and crash with
+    # "size of tensor a (750) must match b (744)" (incident 2026-06-18). The base
+    # must serialize the model forward across threads — never two at once.
+    p = str(tmp_path / "a.wav")
+    _write_sine(p, sr=16000, secs=0.2)
+    emb = _ConcurrencyProbe()
+    clip = Clip("a", "x", p)
+    threads = [threading.Thread(target=lambda: emb.embed([clip])) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert emb.max_inside == 1
 
 
 def test_embed_normalizes_and_shapes(tmp_path):

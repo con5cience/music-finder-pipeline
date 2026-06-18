@@ -8,6 +8,7 @@ embedder is consistent and the model-specific code stays tiny.
 from __future__ import annotations
 
 import abc
+import threading
 
 import numpy as np
 import soundfile as sf
@@ -43,6 +44,15 @@ class AudioEmbedder(abc.ABC):
     def __init__(self, device: str | None = None) -> None:
         self.device = device or select_device()
         self._loaded = False
+        # GPU activities run concurrently (asyncio.to_thread, concurrency 2-3)
+        # against ONE shared embedder per worker. Some backbones carry shared
+        # mutable state across a forward — MuQ's conformer caches its rotary
+        # positional embedding on the module and returns the shared field, so
+        # two threads with different padded batch lengths race it and crash
+        # ("size of tensor a (750) must match b (744)", 2026-06-18). Serialize
+        # the forward; audio decode/resample stays outside the lock so CPU prep
+        # still overlaps GPU compute (the parallelism concurrency buys us).
+        self._forward_lock = threading.Lock()
 
     @abc.abstractmethod
     def _load(self) -> None: ...
@@ -69,7 +79,8 @@ class AudioEmbedder(abc.ABC):
         use_amp = self.device.startswith("cuda") and os.environ.get("PIPELINE_FP16", "1") != "0"
         with torch.no_grad(), torch.autocast("cuda", dtype=torch.float16, enabled=use_amp):
             for i in range(0, len(wavs), self.batch_size):
-                feats = self._features(wavs[i : i + self.batch_size])
+                with self._forward_lock:
+                    feats = self._features(wavs[i : i + self.batch_size])
                 feats = torch.nn.functional.normalize(feats.float(), dim=-1)
                 out.append(feats.cpu())
                 if self.device.startswith("cuda"):
