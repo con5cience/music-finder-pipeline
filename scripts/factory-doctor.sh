@@ -12,7 +12,12 @@ ZEROES=0
 # wedged reader. Comfortably above the seeder's clamped legit max (~1000:
 # low-water 500 + batch 500 overshoot). See 2026-06-15.
 FLOOD=1500
-sleep 120  # let the fleet boot before judging it
+# A force-recreate (and a cold boot) triggers a ~35min GPU cold-start: the
+# embedder + 3 XLM-Roberta tag heads reload before any embed lands. The doctor
+# must not count that warmup as zero-embed strikes, or it recreates a still-
+# loading worker and resets the load — a restart loop (near-miss 2026-06-18).
+WARMUP=2700
+sleep "$WARMUP"  # was 120 — let the fleet finish its cold-start before judging
 while true; do
   if [ -f /workspace/.maintenance-window ]; then
     echo "$(date -u +%H:%M) doctor: maintenance window open — standing down"
@@ -43,6 +48,10 @@ while true; do
       else
         echo "$(date -u +%H:%M) doctor: wedged-reader (running=${RUNNING:-unknown}) — recreating workers"
         docker compose -f /workspace/compose.yaml up -d --force-recreate worker-gpu worker-io
+        ZEROES=0
+        echo "$(date -u +%H:%M) doctor: recreated — warming up ${WARMUP}s (GPU model reload) before resuming checks"
+        sleep "$WARMUP"
+        continue
       fi
       ZEROES=0
     fi
