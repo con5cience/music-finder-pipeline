@@ -17,6 +17,18 @@ FLOOD=1500
 # must not count that warmup as zero-embed strikes, or it recreates a still-
 # loading worker and resets the load — a restart loop (near-miss 2026-06-18).
 WARMUP=2700
+# GPU util + VRAM, sampled THROUGH the worker-gpu container (the doctor's own
+# alpine image has no nvidia-smi). Every incident (2026-06-14/15/18) was hard to
+# triage for lack of GPU state at the decision: high util + zero embeds = stage
+# downstream of the GPU wedged or a flood; low util + zero embeds = a wedged or
+# still-cold-starting worker. Logging it next to every verdict makes the next
+# stall a one-look call. "n/a" if the worker is down/unreachable.
+gpu_stat() {
+  docker compose -f /workspace/compose.yaml exec -T worker-gpu \
+    nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total \
+    --format=csv,noheader,nounits 2>/dev/null \
+    | head -1 | awk -F',' 'NF{gsub(/ /,"");print $1"% "$2"/"$3"MB"}' || true
+}
 sleep "$WARMUP"  # was 120 — let the fleet finish its cold-start before judging
 while true; do
   if [ -f /workspace/.maintenance-window ]; then
@@ -27,12 +39,13 @@ while true; do
   fi
   RATE=$(psql "$PIPELINE_DATABASE_URL" -tAc \
     "SELECT count(*) FROM artist_embedding WHERE computed_at > now() - interval '30 minutes'" 2>/dev/null)
+  GPU=$(gpu_stat); GPU=${GPU:-n/a}
   if [ -z "$RATE" ]; then
-    echo "$(date -u +%H:%M) doctor: DB unreachable — no action"
+    echo "$(date -u +%H:%M) doctor: DB unreachable — no action [gpu $GPU]"
     ZEROES=0
   elif [ "$RATE" -eq 0 ]; then
     ZEROES=$((ZEROES+1))
-    echo "$(date -u +%H:%M) doctor: zero embeds (strike $ZEROES/2)"
+    echo "$(date -u +%H:%M) doctor: zero embeds (strike $ZEROES/2) [gpu $GPU]"
     if [ "$ZEROES" -ge 2 ]; then
       # Branch the remedy on WHY embeds stalled. A FLOOD (too many workflows in
       # flight) overwhelms Temporal; recreating workers just re-polls the flood
@@ -43,10 +56,10 @@ while true; do
         -q "ExecutionStatus='Running' AND WorkflowType='IngestArtistWorkflow'" 2>/dev/null \
         | grep -oE '[0-9]+' | head -1)
       if [ -n "$RUNNING" ] && [ "$RUNNING" -ge "$FLOOD" ]; then
-        echo "$(date -u +%H:%M) doctor: FLOOD ($RUNNING running >= $FLOOD) — stopping seeder (recreating workers won't help; the flood lives in Temporal)"
+        echo "$(date -u +%H:%M) doctor: FLOOD ($RUNNING running >= $FLOOD, gpu $GPU) — stopping seeder (recreating workers won't help; the flood lives in Temporal)"
         docker compose -f /workspace/compose.yaml stop seeder
       else
-        echo "$(date -u +%H:%M) doctor: wedged-reader (running=${RUNNING:-unknown}) — recreating workers"
+        echo "$(date -u +%H:%M) doctor: wedged-reader (running=${RUNNING:-unknown}, gpu $GPU) — recreating workers"
         docker compose -f /workspace/compose.yaml up -d --force-recreate worker-gpu worker-io
         ZEROES=0
         echo "$(date -u +%H:%M) doctor: recreated — warming up ${WARMUP}s (GPU model reload) before resuming checks"
@@ -57,7 +70,7 @@ while true; do
     fi
   else
     ZEROES=0
-    echo "$(date -u +%H:%M) doctor: healthy (~$((RATE*2))/hr)"
+    echo "$(date -u +%H:%M) doctor: healthy (~$((RATE*2))/hr) [gpu $GPU]"
   fi
   sleep 1800
 done

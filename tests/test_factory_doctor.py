@@ -62,6 +62,19 @@ def test_doctor_boot_grace_covers_cold_start():
     assert 'sleep "$WARMUP"' in src
 
 
+def test_doctor_logs_gpu_util_at_each_verdict():
+    # Every embed-stall incident (2026-06-14/15/18) was hard to triage without
+    # GPU state at the decision. The doctor samples util+VRAM through the
+    # worker-gpu container (its own alpine image has no nvidia-smi) and logs it
+    # beside every verdict so the next stall is a one-look call.
+    src = (ROOT / "scripts" / "factory-doctor.sh").read_text()
+    assert "nvidia-smi" in src
+    assert "exec -T worker-gpu" in src  # sampled through the GPU container
+    # threaded onto the verdict lines, not just defined
+    assert src.count("[gpu $GPU]") >= 2
+    assert "gpu $GPU)" in src  # flood + wedge decision lines
+
+
 def test_doctor_branches_flood_vs_wedge():
     # 2026-06-15: a Temporal flood (not a wedged worker) stalled embeds, and the
     # recreate-only doctor flapped uselessly. The remedy must branch on the
