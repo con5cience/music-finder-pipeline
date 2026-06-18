@@ -12,10 +12,12 @@ ZEROES=0
 # wedged reader. Comfortably above the seeder's clamped legit max (~1000:
 # low-water 500 + batch 500 overshoot). See 2026-06-15.
 FLOOD=1500
-# A force-recreate (and a cold boot) triggers a ~35min GPU cold-start: the
-# embedder + 3 XLM-Roberta tag heads reload before any embed lands. The doctor
-# must not count that warmup as zero-embed strikes, or it recreates a still-
-# loading worker and resets the load — a restart loop (near-miss 2026-06-18).
+# After a force-recreate (or cold boot) embeds can take ~30+ min to resume. This
+# is NOT model reload — that's ~30s (measured 2026-06-18: worker idle ~33min,
+# THEN a ~27s embedder + 3 XLM-Roberta load). The gap is the embed queue
+# refilling / work flowing back to the fresh worker. The doctor must not count it
+# as zero-embed strikes, or it recreates a still-warming worker and resets the
+# wait — a restart loop (near-miss 2026-06-18). WARMUP must cover the whole gap.
 WARMUP=2700
 # GPU util + VRAM, sampled THROUGH the worker-gpu container (the doctor's own
 # alpine image has no nvidia-smi). Every incident (2026-06-14/15/18) was hard to

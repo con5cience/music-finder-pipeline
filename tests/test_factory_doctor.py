@@ -39,16 +39,16 @@ def test_lock_is_gitignored():
 
 
 def test_doctor_warms_up_after_recreate():
-    # 2026-06-18: a force-recreate triggers a ~35min GPU cold-start (embedder +
-    # XLM-Roberta tag heads reload). The doctor measured zero embeds during that
-    # warmup and logged strike 1/2 against a worker that was loading normally —
-    # one strike from recreating it mid-load and resetting the cold-start (a
-    # restart loop). After recreating, it must defer the next judgment by a
-    # warmup grace that exceeds the cold-start.
+    # 2026-06-18: after a force-recreate embeds took ~33min to resume (NOT model
+    # reload — that's ~30s — but the embed queue refilling / work flowing back to
+    # the fresh worker). The doctor measured zero embeds during that gap and
+    # logged strike 1/2 against a worker warming up normally — one strike from
+    # recreating it mid-warmup and resetting the wait (a restart loop). After
+    # recreating, it must defer the next judgment by a grace that covers the gap.
     src = (ROOT / "scripts" / "factory-doctor.sh").read_text()
     assert "WARMUP=" in src
     warmup = int(src.split("WARMUP=")[1].split()[0])
-    assert warmup >= 2400  # > observed ~35min cold-start
+    assert warmup >= 2400  # > observed ~33min post-recreate gap
     # the recreate (wedge) branch defers via the warmup grace, then re-loops
     wedge = src.split("force-recreate worker-gpu worker-io")[1]
     assert 'sleep "$WARMUP"' in wedge
