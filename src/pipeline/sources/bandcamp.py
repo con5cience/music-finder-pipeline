@@ -104,6 +104,25 @@ def parse_tralbum(body: bytes) -> dict | None:
     return {"artist": page_artist, "release_date": d.get("album_release_date"), "tracks": tracks}
 
 
+def upsert_bandcamp_tags(conn: Connection, artist_id: str, subdomain: str, band_name: str | None, tags: list[str]) -> None:
+    """Persist human Bandcamp tags into the bc_candidate middle tier (read by
+    publish.bandcamp_tags_batch via artist_id). No-op on empty tags so we never
+    clobber existing crawl tags with nothing. Idempotent (upsert on platform_id)."""
+    if not tags:
+        return
+    conn.execute(
+        """
+        INSERT INTO bc_candidate (platform_id, band_name, band_url, artist_id, tags)
+        VALUES (%s, %s, %s, %s::uuid, %s)
+        ON CONFLICT (platform_id) DO UPDATE SET
+            tags = EXCLUDED.tags,
+            artist_id = COALESCE(EXCLUDED.artist_id, bc_candidate.artist_id),
+            band_name = COALESCE(NULLIF(EXCLUDED.band_name, ''), bc_candidate.band_name)
+        """,
+        (subdomain, band_name or subdomain, f"https://{subdomain}.bandcamp.com", str(artist_id), tags),
+    )
+
+
 def discover_bandcamp(
     conn: Connection,
     artist_id: str,
@@ -112,7 +131,9 @@ def discover_bandcamp(
     fetcher=None,
     cache_dir: Path | str | None = None,
 ) -> int:
-    """Walk newest releases, store ALL streamable tracks; returns NEW rows."""
+    """Walk newest releases, store ALL streamable tracks; returns NEW rows. Also
+    harvests the pages' human genre tags into bc_candidate (the audio fetch
+    already has the bodies — see #35)."""
     identity_id = identity_row(conn, "bandcamp", artist_id, subdomain)
     base = f"https://{subdomain}.bandcamp.com"
 
@@ -124,10 +145,16 @@ def discover_bandcamp(
         releases = [""]  # single-release artists: the root page IS the album
 
     written = 0
+    harvested: dict[str, None] = {}  # ordered set of tags across releases
+    band_name: str | None = None
     for release_index, path in enumerate(releases):
-        parsed = parse_tralbum(get(path))
+        body = get(path)
+        for tag in parse_bandcamp_tags(body):
+            harvested.setdefault(tag, None)
+        parsed = parse_tralbum(body)
         if parsed is None:
             continue
+        band_name = band_name or parsed.get("artist")
         for track_index, t in enumerate(parsed["tracks"]):
             evidence: dict = {
                 "source": "bandcamp_tralbum",
@@ -146,6 +173,7 @@ def discover_bandcamp(
                 conn, artist_id, "bandcamp", t.track_id, t.stream_url, t.duration_s, identity_id, evidence
             ):
                 written += 1
+    upsert_bandcamp_tags(conn, artist_id, subdomain, band_name, list(harvested))
     return written
 
 
