@@ -844,6 +844,13 @@ def publish_rows(factory: Connection, app: Connection, rows: list[tuple], anchor
                     {", %s" * len(urls)})
             {conflict} DO UPDATE SET
                 name = EXCLUDED.name, slug = EXCLUDED.slug, tags = EXCLUDED.tags,
+                -- Dirty-mark for incremental revector (#35): NULL the tag_vector
+                -- ONLY when tags actually change (jsonb IS DISTINCT FROM is
+                -- key-order-independent), so `rebuild-vectors --incremental`
+                -- (onlyMissing) rebuilds exactly the changed artists — no full
+                -- revector for routine tag changes.
+                tag_vector = CASE WHEN artists.tags IS DISTINCT FROM EXCLUDED.tags
+                                  THEN NULL ELSE artists.tag_vector END,
                 audio_embedding = EXCLUDED.audio_embedding,
                 signal_ratio = EXCLUDED.signal_ratio,
                 embedding_source = EXCLUDED.embedding_source,

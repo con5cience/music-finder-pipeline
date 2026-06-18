@@ -21,6 +21,7 @@ def _serving_schema(conn):
             slug text,
             tags jsonb,
             audio_embedding text,
+            tag_vector text,
             signal_ratio real,
             embedding_source text,
             perceptual jsonb,
