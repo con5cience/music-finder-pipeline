@@ -652,8 +652,11 @@ def bandcamp_tags_batch(conn: Connection, aids: list) -> dict[str, dict]:
     """HUMAN Bandcamp tags per artist (bc_candidate.tags) — the middle tier: what
     the artist self-describes on the site. Used where MB has no editorial genres;
     later clobbered by MB once the artist is approved + reingested. Uniform weight
-    (human tags carry no score), capped at AUDIO_TAG_K to match curated concision.
-    Empty for artists with no Bandcamp tags (so the audio tier takes over)."""
+    (human tags carry no score), capped at TAG_K — the HUMAN-tier cap (same as MB),
+    NOT the tight AUDIO_TAG_K: these are trustworthy human tags, so we keep the
+    full set rather than truncate the best one alphabetically (the serving-side
+    IDF down-weights generic tags like 'electronic' anyway, #30). Empty for
+    artists with no Bandcamp tags (so the audio tier takes over)."""
     out: dict[str, dict] = {}
     for aid, tag in conn.execute(
         """
@@ -665,7 +668,7 @@ def bandcamp_tags_batch(conn: Connection, aids: list) -> dict[str, dict]:
         ([str(a) for a in aids],),
     ).fetchall():
         d = out.setdefault(aid, {})
-        if len(d) < AUDIO_TAG_K:
+        if len(d) < TAG_K:
             d[tag] = 1
     return out
 
