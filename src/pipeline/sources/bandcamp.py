@@ -29,6 +29,31 @@ from pipeline.sources.common import identity_row, insert_audio_track, store_refr
 _RELEASE_WALK_LIMIT = 5
 _HREF_RE = re.compile(r'href="(/(?:album|track)/[^"#?]+)"')
 _TRALBUM_RE = re.compile(r'data-tralbum="([^"]+)"')
+# Human genre tags + the artist location, both rendered as <a class="tag"> on
+# release/track pages. `[^>]*` spans the multi-line href; `[^<]+` the (possibly
+# whitespace-padded) label.
+_TAG_RE = re.compile(r'<a class="tag"[^>]*>([^<]+)</a>')
+_LOCATION_RE = re.compile(r'class="location[^"]*"[^>]*>([^<]+)<')
+
+
+def parse_bandcamp_tags(body: bytes) -> list[str]:
+    """Human genre tags from a Bandcamp release/track page's `<a class="tag">`
+    list. Bandcamp renders the artist LOCATION with the same class, so it's
+    dropped (matched against the page's `class="location"` city). HTML-unescaped,
+    lowercased, de-duplicated in document order. Returns [] when the page has no
+    tag block (e.g. the /music discography index)."""
+    text = body.decode("utf-8", errors="replace")
+    loc = _LOCATION_RE.search(text)
+    city = _html.unescape(loc.group(1)).split(",")[0].strip().lower() if loc else None
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in _TAG_RE.finditer(text):
+        tag = _html.unescape(m.group(1)).strip().lower()
+        if not tag or tag == city or tag in seen:
+            continue
+        seen.add(tag)
+        out.append(tag)
+    return out
 
 
 @dataclass(frozen=True)
