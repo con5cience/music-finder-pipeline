@@ -793,6 +793,16 @@ def publish_rows(factory: Connection, app: Connection, rows: list[tuple], anchor
             anchors = load_anchor_genres(factory)
         audio_by = _artist_tags_knn(factory, audio_aids, g_artist, anchors)
     tags_by = {str(a): (mb_by.get(str(a)) or bc_by.get(str(a)) or audio_by.get(str(a)) or {}) for a in aids}
+    # Curated black-hole (#35): drop manually-blocklisted tags across EVERY tier
+    # — mainly location-as-genre leaks via Bandcamp human tags (cdmx, mexico,
+    # oakland, …). Single chokepoint so MB/BC/audio are all covered; tags are
+    # stored lowercase, matching the per-tier lowercasing above.
+    has_bl = factory.execute("SELECT to_regclass('tag_manual_blocklist')").fetchone()[0] is not None
+    blocked = (
+        {r[0] for r in factory.execute("SELECT tag FROM tag_manual_blocklist").fetchall()} if has_bl else set()
+    )
+    if blocked:
+        tags_by = {a: {t: w for t, w in tags.items() if t not in blocked} for a, tags in tags_by.items()}
     perc_by = artist_perceptual_batch(factory, aids)
     lang_by = artist_language_batch(factory, aids)
     loc_by = artist_location_batch(factory, aids)
