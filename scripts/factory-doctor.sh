@@ -40,12 +40,20 @@ while true; do
   RATE=$(psql "$PIPELINE_DATABASE_URL" -tAc \
     "SELECT count(*) FROM artist_embedding WHERE computed_at > now() - interval '30 minutes'" 2>/dev/null)
   GPU=$(gpu_stat); GPU=${GPU:-n/a}
+  # Embed work-availability: total backlog (never-embedded artists) + embed-READY
+  # depth (null-embedding artists that already have discovered audio_track rows).
+  # Pairs with GPU-util to triage a warm-up gap: idle GPU + ready>0 = the GPU is
+  # being starved despite work existing (dispatch/feed stall); idle GPU + ready~0
+  # = upstream discovery/prep is the bottleneck. ~250ms, indexed. n/a if DB down.
+  QUEUE=$(psql "$PIPELINE_DATABASE_URL" -tAc \
+    "SELECT 'backlog='||(SELECT count(*) FROM artist WHERE embedding_source IS NULL)||' ready='||(SELECT count(*) FROM artist a WHERE a.embedding_source IS NULL AND EXISTS (SELECT 1 FROM audio_track t WHERE t.artist_id=a.id))" 2>/dev/null)
+  QUEUE=${QUEUE:-n/a}
   if [ -z "$RATE" ]; then
-    echo "$(date -u +%H:%M) doctor: DB unreachable — no action [gpu $GPU]"
+    echo "$(date -u +%H:%M) doctor: DB unreachable — no action [gpu $GPU | $QUEUE]"
     ZEROES=0
   elif [ "$RATE" -eq 0 ]; then
     ZEROES=$((ZEROES+1))
-    echo "$(date -u +%H:%M) doctor: zero embeds (strike $ZEROES/2) [gpu $GPU]"
+    echo "$(date -u +%H:%M) doctor: zero embeds (strike $ZEROES/2) [gpu $GPU | $QUEUE]"
     if [ "$ZEROES" -ge 2 ]; then
       # Branch the remedy on WHY embeds stalled. A FLOOD (too many workflows in
       # flight) overwhelms Temporal; recreating workers just re-polls the flood
@@ -56,10 +64,10 @@ while true; do
         -q "ExecutionStatus='Running' AND WorkflowType='IngestArtistWorkflow'" 2>/dev/null \
         | grep -oE '[0-9]+' | head -1)
       if [ -n "$RUNNING" ] && [ "$RUNNING" -ge "$FLOOD" ]; then
-        echo "$(date -u +%H:%M) doctor: FLOOD ($RUNNING running >= $FLOOD, gpu $GPU) — stopping seeder (recreating workers won't help; the flood lives in Temporal)"
+        echo "$(date -u +%H:%M) doctor: FLOOD ($RUNNING running >= $FLOOD, gpu $GPU, $QUEUE) — stopping seeder (recreating workers won't help; the flood lives in Temporal)"
         docker compose -f /workspace/compose.yaml stop seeder
       else
-        echo "$(date -u +%H:%M) doctor: wedged-reader (running=${RUNNING:-unknown}, gpu $GPU) — recreating workers"
+        echo "$(date -u +%H:%M) doctor: wedged-reader (running=${RUNNING:-unknown}, gpu $GPU, $QUEUE) — recreating workers"
         docker compose -f /workspace/compose.yaml up -d --force-recreate worker-gpu worker-io
         ZEROES=0
         echo "$(date -u +%H:%M) doctor: recreated — warming up ${WARMUP}s (GPU model reload) before resuming checks"
@@ -70,7 +78,7 @@ while true; do
     fi
   else
     ZEROES=0
-    echo "$(date -u +%H:%M) doctor: healthy (~$((RATE*2))/hr) [gpu $GPU]"
+    echo "$(date -u +%H:%M) doctor: healthy (~$((RATE*2))/hr) [gpu $GPU | $QUEUE]"
   fi
   sleep 1800
 done

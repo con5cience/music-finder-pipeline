@@ -70,9 +70,22 @@ def test_doctor_logs_gpu_util_at_each_verdict():
     src = (ROOT / "scripts" / "factory-doctor.sh").read_text()
     assert "nvidia-smi" in src
     assert "exec -T worker-gpu" in src  # sampled through the GPU container
-    # threaded onto the verdict lines, not just defined
-    assert src.count("[gpu $GPU]") >= 2
-    assert "gpu $GPU)" in src  # flood + wedge decision lines
+    # threaded onto the verdict lines (healthy / DB-unreachable / strike / flood /
+    # wedge), not just defined
+    assert src.count("$GPU") >= 5
+
+
+def test_doctor_logs_queue_depth_at_each_verdict():
+    # GPU-util alone can't answer the warm-up question "was there work to do?".
+    # The doctor also samples the embed backlog (artists never embedded) and the
+    # embed-READY depth (null-embedding artists that already have discovered
+    # audio) so a gap classifies in one look: GPU idle + ready>0 = dispatch/feed
+    # stall; GPU idle + ready~0 = upstream discovery/prep starved (2026-06-18).
+    src = (ROOT / "scripts" / "factory-doctor.sh").read_text()
+    assert "embedding_source IS NULL" in src  # total backlog
+    assert "audio_track" in src               # embed-ready = has discovered audio
+    assert "ready=" in src
+    assert src.count("$QUEUE") >= 5           # threaded onto every verdict line
 
 
 def test_doctor_branches_flood_vs_wedge():
