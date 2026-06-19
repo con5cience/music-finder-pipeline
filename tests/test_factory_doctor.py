@@ -49,17 +49,59 @@ def test_doctor_warms_up_after_recreate():
     assert "WARMUP=" in src
     warmup = int(src.split("WARMUP=")[1].split()[0])
     assert warmup >= 2400  # > observed ~33min post-recreate gap
-    # the recreate (wedge) branch defers via the warmup grace, then re-loops
-    wedge = src.split("force-recreate worker-gpu worker-io")[1]
-    assert 'sleep "$WARMUP"' in wedge
-    assert "continue" in wedge.split('sleep "$WARMUP"')[1][:40]
+    # the recreate (wedge) branch defers via the warmup() grace, then re-loops.
+    # warmup() is defined earlier (it also recreates on DOA), so the wedge branch
+    # is the LAST occurrence of the recreate command.
+    wedge = src.split("force-recreate worker-gpu worker-io")[-1]
+    assert "warmup" in wedge
+    assert "continue" in wedge.split("warmup")[1][:40]
 
 
 def test_doctor_boot_grace_covers_cold_start():
-    # the pre-loop boot grace must also cover the cold-start, not the old 120s
+    # the pre-loop boot grace must also cover the cold-start, not the old 120s,
+    # and uses the same warmup() helper (grace + DOA probe), not a blind sleep
     src = (ROOT / "scripts" / "factory-doctor.sh").read_text()
     assert "sleep 120" not in src
-    assert 'sleep "$WARMUP"' in src
+    assert 'sleep "$WARMUP"' not in src  # superseded by the warmup() helper
+    preloop = [l.strip() for l in src.split("while true; do")[0].splitlines() if l.strip()]
+    assert "warmup() {" in src  # helper defined
+    assert any(l == "warmup" or l.startswith("warmup ") for l in preloop)  # invoked before loop
+
+
+def test_warmup_probes_for_doa_worker():
+    # 2026-06-19: a force-recreate can bring up a worker whose MuQ model never
+    # loads (784MB resident vs ~5221MB live floor). The blind 2700s sleep masked
+    # it ~75min until two zero-embed strikes. warmup() must abort the grace early
+    # and recreate when the model is absent from VRAM past a short load deadline.
+    src = (ROOT / "scripts" / "factory-doctor.sh").read_text()
+    body = src.split("warmup() {")[1].split("\n}")[0]
+    # a short load deadline distinct from the full grace
+    deadline = int(src.split("MODEL_LOAD_DEADLINE=")[1].split()[0])
+    assert deadline < 2400  # much shorter than WARMUP — catches DOA in minutes
+    # the model-resident floor cleanly separates DOA (~784MB) from live (~5221MB)
+    floor = int(src.split("MODEL_MIN_MB=")[1].split()[0])
+    assert 784 < floor < 5221
+    # probes memory.used through the GPU container and recreates on a shortfall
+    assert "gpu_mem_mb" in body
+    assert "memory.used" in src
+    assert "MODEL_MIN_MB" in body
+    assert "force-recreate worker-gpu worker-io" in body
+
+
+def test_warmup_ignores_inconclusive_gpu_reading():
+    # an empty VRAM reading means the worker isn't exec-able yet (still starting),
+    # NOT that the model is absent — it must never trigger a DOA recreate.
+    src = (ROOT / "scripts" / "factory-doctor.sh").read_text()
+    body = src.split("warmup() {")[1].split("\n}")[0]
+    assert '-n "$_mem"' in body  # only a non-empty reading can be DOA
+
+
+def test_warmup_caps_doa_recreates():
+    # a host GPU/driver fault won't be fixed by recreating — bound the attempts
+    # so warmup() can't flap recreates forever.
+    src = (ROOT / "scripts" / "factory-doctor.sh").read_text()
+    body = src.split("warmup() {")[1].split("\n}")[0]
+    assert "DOA_RECREATES_MAX" in body
 
 
 def test_doctor_logs_gpu_util_at_each_verdict():

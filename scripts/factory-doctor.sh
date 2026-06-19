@@ -19,6 +19,18 @@ FLOOD=1500
 # as zero-embed strikes, or it recreates a still-warming worker and resets the
 # wait — a restart loop (near-miss 2026-06-18). WARMUP must cover the whole gap.
 WARMUP=2700
+# Liveness probe DURING warm-up. The grace legitimately covers the embed queue
+# refilling, but a blind sleep also masks a DOA worker whose MuQ model never
+# loads (incident 2026-06-19: a recreate brought up a worker at 784MB resident —
+# no model — and the 2700s sleep hid it ~75min, until two zero-embed strikes
+# finally recreated it). warm-up still waits the full grace for the queue, but
+# aborts early to a recreate if the model is absent from VRAM past the load
+# deadline. Only a VALID sub-threshold reading is DOA; an empty reading (worker
+# not yet exec-able) is inconclusive and waits on. Capped so a host GPU/driver
+# fault can't flap recreates forever.
+MODEL_MIN_MB=3000        # live floor ~5221MB observed, DOA ~784MB — wide margin
+MODEL_LOAD_DEADLINE=600  # model load is ~30s; absent by 10min => DOA, not slow
+DOA_RECREATES_MAX=2
 # GPU util + VRAM, sampled THROUGH the worker-gpu container (the doctor's own
 # alpine image has no nvidia-smi). Every incident (2026-06-14/15/18) was hard to
 # triage for lack of GPU state at the decision: high util + zero embeds = stage
@@ -31,7 +43,32 @@ gpu_stat() {
     --format=csv,noheader,nounits 2>/dev/null \
     | head -1 | awk -F',' 'NF{gsub(/ /,"");print $1"% "$2"/"$3"MB"}' || true
 }
-sleep "$WARMUP"  # was 120 — let the fleet finish its cold-start before judging
+# Just memory.used (MB) for the warm-up liveness probe; empty if the worker is
+# down / not yet exec-able (treated as inconclusive by warmup, never as DOA).
+gpu_mem_mb() {
+  docker compose -f /workspace/compose.yaml exec -T worker-gpu \
+    nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null \
+    | head -1 | tr -dc '0-9'
+}
+# Wait out the post-recreate / cold-start grace (queue refill), but recreate
+# early if the worker is dead-on-arrival — the MuQ model never became
+# GPU-resident. Replaces the old blind WARMUP-second sleep.
+warmup() {
+  _doa=0; _elapsed=0
+  while [ "$_elapsed" -lt "$WARMUP" ]; do
+    sleep 60; _elapsed=$((_elapsed+60))
+    [ "$_elapsed" -lt "$MODEL_LOAD_DEADLINE" ] && continue
+    [ "$_doa" -ge "$DOA_RECREATES_MAX" ] && continue
+    _mem=$(gpu_mem_mb)
+    if [ -n "$_mem" ] && [ "$_mem" -lt "$MODEL_MIN_MB" ]; then
+      _doa=$((_doa+1))
+      echo "$(date -u +%H:%M) doctor: DOA worker — MuQ model not resident (${_mem}MB < ${MODEL_MIN_MB}MB) after ${_elapsed}s, recreating ($_doa/$DOA_RECREATES_MAX)"
+      docker compose -f /workspace/compose.yaml up -d --force-recreate worker-gpu worker-io
+      _elapsed=0
+    fi
+  done
+}
+warmup  # bounded cold-start grace + DOA liveness probe (was a blind WARMUP sleep)
 while true; do
   if [ -f /workspace/.maintenance-window ]; then
     echo "$(date -u +%H:%M) doctor: maintenance window open — standing down"
@@ -72,8 +109,8 @@ while true; do
         echo "$(date -u +%H:%M) doctor: wedged-reader (running=${RUNNING:-unknown}, gpu $GPU, $QUEUE) — recreating workers"
         docker compose -f /workspace/compose.yaml up -d --force-recreate worker-gpu worker-io
         ZEROES=0
-        echo "$(date -u +%H:%M) doctor: recreated — warming up ${WARMUP}s (GPU model reload) before resuming checks"
-        sleep "$WARMUP"
+        echo "$(date -u +%H:%M) doctor: recreated — warming up (queue-refill grace + DOA probe) before resuming checks"
+        warmup
         continue
       fi
       ZEROES=0
