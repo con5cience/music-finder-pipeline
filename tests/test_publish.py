@@ -740,6 +740,67 @@ def test_publish_unions_mb_genres_and_bandcamp_tags(conn):
     assert 'zz-bctag1' in tags and 'zz-bctag2' in tags  # Bandcamp tier ALSO kept (the fix)
 
 
+def test_recover_genre_tokens_longest_match():
+    """Compound tokenization: pull approved genre n-grams out of a compound tag,
+    longest match first; pure junk recovers nothing."""
+    from pipeline.publish import recover_genre_tokens
+
+    approved = frozenset({'doom', 'metal', 'black metal', 'death metal', 'punk'})
+    assert recover_genre_tokens('progressive doom', approved) == ['doom']
+    assert recover_genre_tokens('orchestral metal', approved) == ['metal']
+    # longest match wins — 'black metal', not 'metal'
+    assert recover_genre_tokens('atmospheric black metal', approved) == ['black metal']
+    # separators (- _ /) are word breaks
+    assert recover_genre_tokens('progressive-doom', approved) == ['doom']
+    assert recover_genre_tokens('crust/punk', approved) == ['punk']
+    # pure non-genre recovers nothing
+    assert recover_genre_tokens('voodoo', approved) == []
+    assert recover_genre_tokens('pizza', approved) == []
+
+
+def test_allowlist_bc_tags_keeps_approved_recovers_undecided_drops_blocked():
+    """The BC gate: approved kept whole, undecided tokenized, blocked dropped
+    (and NOT tokenized — explicit block beats recovery)."""
+    from pipeline.publish import allowlist_bc_tags
+
+    approved = frozenset({'doom', 'metal', 'shoegaze'})
+    blocked = frozenset({'voodoo metal'})  # an explicit block must win over recovery
+    out = allowlist_bc_tags(
+        {'shoegaze': 1, 'progressive doom': 1, 'voodoo': 1, 'voodoo metal': 1},
+        approved, blocked,
+    )
+    assert out.get('shoegaze') == 1          # approved kept whole
+    assert out.get('doom') == 1              # recovered from 'progressive doom'
+    assert 'voodoo' not in out               # pure junk recovers nothing
+    assert 'metal' not in out                # 'voodoo metal' is blocked → not tokenized
+    assert 'voodoo metal' not in out         # blocked dropped
+
+
+def test_publish_tokenizes_undecided_bandcamp_compound(conn):
+    """Integration: a band self-tagging ONLY an undecided compound ('progressive
+    doom') publishes the recovered approved genre ('doom'), not the raw compound."""
+    from pipeline.publish import publish_rows, publishable_artists
+
+    _serving_schema(conn)
+    a = conn.execute(
+        "INSERT INTO artist (display_name, embedding_source) VALUES ('Compound', 'bandcamp') RETURNING id"
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
+        "VALUES (%s,'mock-model',2,'[0.6,0.8]',4,0.67)", (a,),
+    )
+    conn.execute(
+        "INSERT INTO bc_candidate (platform_id, band_name, band_url, tags, status, artist_id) "
+        "VALUES ('zz-compound','Compound','https://x','{\"zz-prog doom\"}','admitted',%s)",
+        (a,),
+    )
+    conn.execute("INSERT INTO tag_approved (tag, source) VALUES ('doom','human')")  # only the token is approved
+    publish_rows(conn, conn, publishable_artists(conn, 10))
+    tags = conn.execute("SELECT tags FROM artists WHERE id=%s", (a,)).fetchone()[0]
+    assert 'doom' in tags                 # recovered approved genre
+    assert 'zz-prog doom' not in tags     # raw undecided compound not published
+
+
 def test_bandcamp_tier_allowlist_drops_unapproved_and_falls_through_to_audio(conn):
     """Genre-only allowlist: a Bandcamp tag NOT in tag_approved is dropped. An
     artist whose BC tags are ALL unapproved must fall through to the audio tier

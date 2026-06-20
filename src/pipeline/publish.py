@@ -673,6 +673,50 @@ def bandcamp_tags_batch(conn: Connection, aids: list) -> dict[str, dict]:
     return out
 
 
+_TOKEN_SEP = re.compile(r"[\-_/]+")  # treat - _ / as word breaks for tokenization
+
+
+def recover_genre_tokens(tag: str, approved: frozenset) -> list[str]:
+    """Greedy longest-match: pull the APPROVED genre n-grams contained in a
+    compound Bandcamp tag, so a band that self-tags only 'progressive doom' (a
+    rare, unapproved compound) still contributes the approved genre 'doom'.
+    Separators (- _ /) count as word breaks. Longest match wins so 'atmospheric
+    black metal' yields 'black metal', not 'metal'. Returns [] when no approved
+    genre word is present (e.g. 'voodoo') — pure junk recovers nothing."""
+    words = _TOKEN_SEP.sub(" ", tag).split()
+    out: list[str] = []
+    n = len(words)
+    i = 0
+    while i < n:
+        hit_end = 0
+        for j in range(n, i, -1):  # try the longest span starting at i first
+            if " ".join(words[i:j]) in approved:
+                out.append(" ".join(words[i:j]))
+                hit_end = j
+                break
+        i = hit_end if hit_end else i + 1
+    return out
+
+
+def allowlist_bc_tags(tags: dict, approved: frozenset, blocked: frozenset) -> dict:
+    """Genre-only gate for the Bandcamp folksonomy tier. Keep APPROVED tags whole;
+    for an UNDECIDED tag recover any approved genre tokens it contains (compound
+    tokenization); drop BLOCKED tags and never tokenize them (an explicit block
+    wins over recovery). Overlapping recoveries keep the max weight. Pure → unit
+    tested; an empty result means the artist has no approved Bandcamp signal and
+    should fall through to the audio tier."""
+    out: dict[str, int] = {}
+    for tag, w in tags.items():
+        if tag in blocked:
+            continue
+        if tag in approved:
+            out[tag] = max(out.get(tag, 0), w)
+            continue
+        for tok in recover_genre_tokens(tag, approved):
+            out[tok] = max(out.get(tok, 0), w)
+    return out
+
+
 def merge_human_tiers(mb: dict, bc: dict) -> dict:
     """UNION the MB-editorial + Bandcamp-human tag tiers (both are human curation).
     Was a cascade (mb OR bc) that dropped an artist's rich Bandcamp folksonomy
@@ -798,22 +842,24 @@ def publish_rows(factory: Connection, app: Connection, rows: list[tuple], anchor
     #      (kNN label-propagation, ADR-025), centered zero-shot as last-resort fallback.
     mb_by = mb_genres_batch(factory, aids)
     bc_by = bandcamp_tags_batch(factory, aids)
-    # Genre-only ALLOWLIST for the Bandcamp folksonomy tier (decision 2026-06-20):
-    # the BC human tier is a messy folksonomy, so only curator-APPROVED tags
-    # (tag_approved) survive — this drops the undecided long tail (mostly df<5
-    # trash) and any non-genre, WITHOUT having to hand-block ~90k tail tags. The
-    # MB-editorial and audio tiers are trusted and deliberately NOT gated here.
-    # Runs BEFORE audio_aids is computed so an artist whose BC tags are ALL
-    # unapproved drops out of bc_by and correctly falls through to the audio tier
-    # (rather than publishing an empty Bandcamp tier).
-    has_ap = factory.execute("SELECT to_regclass('tag_approved')").fetchone()[0] is not None
-    if has_ap:
-        approved = {r[0] for r in factory.execute("SELECT tag FROM tag_approved").fetchall()}
-        bc_by = {
-            a: kept
-            for a, d in bc_by.items()
-            if (kept := {t: w for t, w in d.items() if t in approved})
-        }
+    # Genre-only ALLOWLIST + compound tokenization for the Bandcamp folksonomy
+    # tier (decision 2026-06-20): the BC human tier is a messy folksonomy, so only
+    # curator-APPROVED genre tags survive. Approved tags pass whole; an UNDECIDED
+    # compound is tokenized to recover the approved genre inside it (so a band that
+    # self-tags only 'progressive doom' still contributes 'doom'); blocked + pure
+    # junk ('voodoo') drop out. This keeps the long undecided tail out of serving
+    # WITHOUT a hand-block of ~90k tail tags, while losing no real sub-genre
+    # signal. MB-editorial and audio tiers are trusted and deliberately NOT gated.
+    # Runs BEFORE audio_aids is computed so an artist left with no approved BC
+    # signal drops out of bc_by and falls through to the audio tier.
+    if factory.execute("SELECT to_regclass('tag_approved')").fetchone()[0] is not None:
+        approved = frozenset(r[0] for r in factory.execute("SELECT tag FROM tag_approved").fetchall())
+        bl_exists = factory.execute("SELECT to_regclass('tag_manual_blocklist')").fetchone()[0] is not None
+        blocked_bc = (
+            frozenset(r[0] for r in factory.execute("SELECT tag FROM tag_manual_blocklist").fetchall())
+            if bl_exists else frozenset()
+        )
+        bc_by = {a: r for a, d in bc_by.items() if (r := allowlist_bc_tags(d, approved, blocked_bc))}
     audio_aids = [a for a in aids if str(a) not in mb_by and str(a) not in bc_by]
     audio_by: dict[str, dict] = {}
     if audio_aids:
