@@ -673,6 +673,22 @@ def bandcamp_tags_batch(conn: Connection, aids: list) -> dict[str, dict]:
     return out
 
 
+def merge_human_tiers(mb: dict, bc: dict) -> dict:
+    """UNION the MB-editorial + Bandcamp-human tag tiers (both are human curation).
+    Was a cascade (mb OR bc) that dropped an artist's rich Bandcamp folksonomy
+    whenever MB had even one editorial genre — e.g. autumn-us showed only
+    'gothic rock' while its Bandcamp page lists goth/post-punk/shoegaze/…. A tag
+    present in BOTH tiers is corroborated, so weights ADD (it leads); BC-only tags
+    keep their uniform weight 1. Capped at TAG_K by weight (alphabetical
+    tie-break for determinism). The manual blocklist + serving-side IDF still
+    apply downstream."""
+    merged = dict(mb)
+    for tag, w in bc.items():
+        merged[tag] = merged.get(tag, 0) + w
+    top = sorted(merged.items(), key=lambda kv: (-kv[1], kv[0]))[:TAG_K]
+    return dict(top)
+
+
 def load_anchor_genres(conn: Connection) -> dict[str, frozenset]:
     """artist_id(str) -> frozenset(MB editorial genres) for EVERY MB-covered
     artist — the kNN label-propagation anchors (ADR-025). Same vocab/alias logic
@@ -792,7 +808,15 @@ def publish_rows(factory: Connection, app: Connection, rows: list[tuple], anchor
         if anchors is None:
             anchors = load_anchor_genres(factory)
         audio_by = _artist_tags_knn(factory, audio_aids, g_artist, anchors)
-    tags_by = {str(a): (mb_by.get(str(a)) or bc_by.get(str(a)) or audio_by.get(str(a)) or {}) for a in aids}
+    # MB + Bandcamp are UNIONED (both human curation); audio is the fallback only
+    # when an artist has neither human tier. (Was a cascade that hid Bandcamp
+    # folksonomy behind a lone MB genre — see merge_human_tiers.)
+    def _human_or_audio(a: str) -> dict:
+        mb = mb_by.get(a) or {}
+        bc = bc_by.get(a) or {}
+        return merge_human_tiers(mb, bc) if (mb or bc) else (audio_by.get(a) or {})
+
+    tags_by = {str(a): _human_or_audio(str(a)) for a in aids}
     # Curated black-hole (#35): drop manually-blocklisted tags across EVERY tier
     # — mainly location-as-genre leaks via Bandcamp human tags (cdmx, mexico,
     # oakland, …). Single chokepoint so MB/BC/audio are all covered; tags are

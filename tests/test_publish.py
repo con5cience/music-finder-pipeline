@@ -679,3 +679,58 @@ def test_publish_uses_bandcamp_tags_when_no_mb_genres(conn):
     tags = conn.execute("SELECT tags FROM artists WHERE id=%s", (a,)).fetchone()[0]
     assert 'zz-shoegaze' in tags and 'zz-dream pop' in tags
     assert 'zz-audiotag' not in tags
+
+
+def test_merge_human_tiers_unions_mb_and_bandcamp():
+    """Pure: MB + Bandcamp tiers UNION; a tag in BOTH is corroborated (weights
+    add → it leads); MB-only and BC-only tags are all kept. Empty tier is a no-op."""
+    from pipeline.publish import merge_human_tiers
+
+    out = merge_human_tiers({'goth': 3, 'shoegaze': 2}, {'goth': 1, 'post-punk': 1, 'ethereal': 1})
+    assert out['goth'] == 4  # 3 (MB) + 1 (BC overlap) — corroborated, leads
+    assert out['shoegaze'] == 2  # MB-only kept
+    assert out['post-punk'] == 1 and out['ethereal'] == 1  # BC-only kept
+    assert merge_human_tiers({}, {'a': 1}) == {'a': 1}
+    assert merge_human_tiers({'a': 2}, {}) == {'a': 2}
+
+
+def test_merge_human_tiers_caps_at_tag_k():
+    from pipeline.publish import TAG_K, merge_human_tiers
+
+    out = merge_human_tiers({'lead': 99}, {f'tag{i}': 1 for i in range(TAG_K + 5)})
+    assert len(out) == TAG_K
+    assert out['lead'] == 99  # highest weight survives the cap
+
+
+def test_publish_unions_mb_genres_and_bandcamp_tags(conn):
+    """Regression (autumn-us): an artist with BOTH MB genres AND Bandcamp human
+    tags publishes the UNION, not just the MB tier (the old cascade dropped the
+    Bandcamp folksonomy)."""
+    from pipeline.publish import publish_rows, publishable_artists
+
+    _serving_schema(conn)
+    conn.execute(
+        "INSERT INTO mb_raw.genre (id, gid, name) VALUES "
+        "(971002,'00000000-feed-4bad-9bad-00000000e102','zz-mbgenre2')"
+    )
+    conn.execute("INSERT INTO mb_raw.tag (id, name, ref_count) VALUES (981002,'zz-mbgenre2',1)")
+    mbid = '00000000-feed-4bad-9bad-00000000a802'
+    conn.execute("INSERT INTO mb_raw.artist (id, gid, name, sort_name) VALUES (991002, %s, 'Both', 'Both')", (mbid,))
+    conn.execute("INSERT INTO mb_raw.artist_tag (artist, tag, count) VALUES (991002,981002,4)")
+    a = conn.execute(
+        "INSERT INTO artist (display_name, mbid, embedding_source) VALUES ('Both', %s, 'bandcamp') RETURNING id",
+        (mbid,),
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
+        "VALUES (%s,'mock-model',2,'[0.6,0.8]',4,0.67)", (a,),
+    )
+    conn.execute(
+        "INSERT INTO bc_candidate (platform_id, band_name, band_url, tags, status, artist_id) "
+        "VALUES ('zz-both','Both','https://x','{\"zz-bctag1\",\"zz-bctag2\"}','admitted',%s)",
+        (a,),
+    )
+    publish_rows(conn, conn, publishable_artists(conn, 10))
+    tags = conn.execute("SELECT tags FROM artists WHERE mbid=%s", (mbid,)).fetchone()[0]
+    assert 'zz-mbgenre2' in tags  # MB tier kept
+    assert 'zz-bctag1' in tags and 'zz-bctag2' in tags  # Bandcamp tier ALSO kept (the fix)
