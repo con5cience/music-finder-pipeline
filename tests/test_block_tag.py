@@ -19,7 +19,10 @@ class _FakeConn:
 def test_add_normalizes_tag_to_lowercase_trimmed():
     c = _FakeConn()
     add(c, "  CDMX  ", "location")
-    assert c.calls[-1][1] == ("cdmx", "location")
+    # add() first clears any approval (mutual exclusivity), then upserts the
+    # block with provenance (tag, reason, source).
+    assert c.calls[0] == ("DELETE FROM tag_approved WHERE tag = %s", ("cdmx",))
+    assert c.calls[-1][1] == ("cdmx", "location", "human")
 
 
 def test_remove_normalizes_tag():
