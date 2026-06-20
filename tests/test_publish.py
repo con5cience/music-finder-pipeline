@@ -670,6 +670,8 @@ def test_publish_uses_bandcamp_tags_when_no_mb_genres(conn):
         "VALUES ('zz-bc-only','BCOnly','https://x','{\"zz-shoegaze\",\"zz-dream pop\"}','admitted',%s)",
         (a,),
     )
+    # BC tier is allowlist-gated to tag_approved (genre-only policy) — approve them.
+    conn.execute("INSERT INTO tag_approved (tag, source) VALUES ('zz-shoegaze','human'),('zz-dream pop','human')")
     # an audio tag that must be IGNORED because the Bandcamp tier wins
     conn.execute(
         "INSERT INTO artist_tag_scores (artist_id, tag, score, model) VALUES (%s,'zz-audiotag',0.9,'muq-mulan-large')",
@@ -730,7 +732,68 @@ def test_publish_unions_mb_genres_and_bandcamp_tags(conn):
         "VALUES ('zz-both','Both','https://x','{\"zz-bctag1\",\"zz-bctag2\"}','admitted',%s)",
         (a,),
     )
+    # BC tier is allowlist-gated — approve the two Bandcamp tags so the union holds.
+    conn.execute("INSERT INTO tag_approved (tag, source) VALUES ('zz-bctag1','human'),('zz-bctag2','human')")
     publish_rows(conn, conn, publishable_artists(conn, 10))
     tags = conn.execute("SELECT tags FROM artists WHERE mbid=%s", (mbid,)).fetchone()[0]
     assert 'zz-mbgenre2' in tags  # MB tier kept
     assert 'zz-bctag1' in tags and 'zz-bctag2' in tags  # Bandcamp tier ALSO kept (the fix)
+
+
+def test_bandcamp_tier_allowlist_drops_unapproved_and_falls_through_to_audio(conn):
+    """Genre-only allowlist: a Bandcamp tag NOT in tag_approved is dropped. An
+    artist whose BC tags are ALL unapproved must fall through to the audio tier
+    (not publish an empty Bandcamp tier). MB editorial tier is never gated."""
+    from pipeline.publish import publish_rows, publishable_artists
+
+    _serving_schema(conn)
+    # (1) BC artist with one APPROVED + one UNDECIDED tag → only approved survives.
+    a1 = conn.execute(
+        "INSERT INTO artist (display_name, embedding_source) VALUES ('Mixed', 'bandcamp') RETURNING id"
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
+        "VALUES (%s,'mock-model',2,'[0.6,0.8]',4,0.67)", (a1,),
+    )
+    conn.execute(
+        "INSERT INTO bc_candidate (platform_id, band_name, band_url, tags, status, artist_id) "
+        "VALUES ('zz-mixed','Mixed','https://x','{\"zz-goodgenre\",\"zz-junktag\"}','admitted',%s)",
+        (a1,),
+    )
+    conn.execute("INSERT INTO tag_approved (tag, source) VALUES ('zz-goodgenre','human')")
+    # (2) BC artist whose ONLY tag is unapproved → BC tier empty → audio takes over.
+    # Audio tier (ADR-025 kNN) borrows the MB genre of the sonically-nearest
+    # anchor, so set up a real 1024-dim anchor (EMB_MODEL) for a2 to align with.
+    def vec(i):  # 1024-dim unit vector along axis i
+        return "[" + ",".join("1" if k == i else "0" for k in range(1024)) + "]"
+
+    conn.execute(
+        "INSERT INTO mb_raw.genre (id, gid, name) VALUES "
+        "(973001,'00000000-feed-4bad-9bad-00000000e301','zz-audioborrow')"
+    )
+    conn.execute("INSERT INTO mb_raw.tag (id, name, ref_count) VALUES (983001,'zz-audioborrow',1)")
+    anc_mb = '00000000-feed-4bad-9bad-00000000ab01'
+    conn.execute("INSERT INTO mb_raw.artist (id, gid, name, sort_name) VALUES (993001,%s,'ANC','ANC')", (anc_mb,))
+    conn.execute("INSERT INTO mb_raw.artist_tag (artist, tag, count) VALUES (993001,983001,5)")
+    anc = conn.execute(
+        "INSERT INTO artist (display_name, mbid, embedding_source) VALUES ('ANC',%s,'bandcamp') RETURNING id", (anc_mb,)
+    ).fetchone()[0]
+    a2 = conn.execute(
+        "INSERT INTO artist (display_name, embedding_source) VALUES ('AllJunk', 'bandcamp') RETURNING id"
+    ).fetchone()[0]
+    for aid, v in ((anc, vec(0)), (a2, vec(0))):  # a2 aligns sonically with the anchor
+        conn.execute(
+            "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
+            "VALUES (%s,%s,1024,%s,4,0.9)", (aid, 'muq-large-msd', v),
+        )
+    conn.execute(
+        "INSERT INTO bc_candidate (platform_id, band_name, band_url, tags, status, artist_id) "
+        "VALUES ('zz-alljunk','AllJunk','https://x','{\"zz-onlyjunk\"}','admitted',%s)",
+        (a2,),
+    )
+    publish_rows(conn, conn, publishable_artists(conn, 10))
+    t1 = conn.execute("SELECT tags FROM artists WHERE id=%s", (a1,)).fetchone()[0]
+    assert 'zz-goodgenre' in t1 and 'zz-junktag' not in t1  # unapproved BC tag dropped
+    t2 = conn.execute("SELECT tags FROM artists WHERE id=%s", (a2,)).fetchone()[0]
+    assert 'zz-onlyjunk' not in t2  # all-unapproved BC tier discarded
+    assert 'zz-audioborrow' in t2  # fell through to the audio tier (non-empty)

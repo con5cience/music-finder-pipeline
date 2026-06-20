@@ -798,6 +798,22 @@ def publish_rows(factory: Connection, app: Connection, rows: list[tuple], anchor
     #      (kNN label-propagation, ADR-025), centered zero-shot as last-resort fallback.
     mb_by = mb_genres_batch(factory, aids)
     bc_by = bandcamp_tags_batch(factory, aids)
+    # Genre-only ALLOWLIST for the Bandcamp folksonomy tier (decision 2026-06-20):
+    # the BC human tier is a messy folksonomy, so only curator-APPROVED tags
+    # (tag_approved) survive — this drops the undecided long tail (mostly df<5
+    # trash) and any non-genre, WITHOUT having to hand-block ~90k tail tags. The
+    # MB-editorial and audio tiers are trusted and deliberately NOT gated here.
+    # Runs BEFORE audio_aids is computed so an artist whose BC tags are ALL
+    # unapproved drops out of bc_by and correctly falls through to the audio tier
+    # (rather than publishing an empty Bandcamp tier).
+    has_ap = factory.execute("SELECT to_regclass('tag_approved')").fetchone()[0] is not None
+    if has_ap:
+        approved = {r[0] for r in factory.execute("SELECT tag FROM tag_approved").fetchall()}
+        bc_by = {
+            a: kept
+            for a, d in bc_by.items()
+            if (kept := {t: w for t, w in d.items() if t in approved})
+        }
     audio_aids = [a for a in aids if str(a) not in mb_by and str(a) not in bc_by]
     audio_by: dict[str, dict] = {}
     if audio_aids:
