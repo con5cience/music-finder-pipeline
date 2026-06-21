@@ -238,6 +238,58 @@ def test_backfill_analyzes_embedded_tracks_idempotently(conn, tmp_path):
     assert backfill_tracks(conn, heads, 10, artist_id=str(a)) == (0, 0)
 
 
+def test_backfill_archives_the_windows_it_cuts(conn, tmp_path, monkeypatch):
+    """#54: the head sweep re-cuts the exact embed windows, so it archives them
+    too (best-effort) — a track swept here becomes re-embeddable without re-fetch."""
+    import json
+
+    import soundfile as sf
+
+    import pipeline.backfill_analysis as bf
+
+    a = conn.execute(
+        "INSERT INTO artist (display_name, mbid) VALUES ('Archive Fixture', "
+        "'00000000-feed-4bad-9bad-000000000ddd') RETURNING id"
+    ).fetchone()[0]
+    rng = np.random.default_rng(7)
+    wav = tmp_path / "arch.wav"
+    sf.write(wav, (rng.standard_normal(SR * 90) * 0.1).astype(np.float32), SR)
+    t = conn.execute(
+        "INSERT INTO audio_track (artist_id, platform, platform_track_id, audio_url, duration_s, "
+        "binding_tier, binding_evidence, verification_status) "
+        "VALUES (%s,'bandcamp','zz-arch-1',%s,90,'A',%s,'verified') RETURNING id",
+        (a, str(wav), json.dumps({"release_index": 0, "track_index": 0})),
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO clip_embedding (track_id, segment_start_s, segment_end_s, model, dim, embedding) "
+        "VALUES (%s, 0, 30, 'mock-model', 2, '[0.6,0.8]')",
+        (t,),
+    )
+
+    class FakeScorer:
+        def embed_clips(self, artist_id, clip_paths):
+            return np.ones((len(clip_paths), 4), dtype=np.float32)
+
+        def score_vectors(self, vecs, top_k=20):
+            return [("zz-arch-genre", 0.5)]
+
+    from pipeline.heads import CpuAnalysisHead, TagHead
+
+    # stub the archiver (no ffmpeg / disk dependency in tests) and capture the call
+    calls = []
+    monkeypatch.setattr(
+        bf, "_try_archive",
+        lambda conn, artist_id, track_id, platform, segs: calls.append((artist_id, track_id, platform, len(segs))),
+    )
+
+    done, _ = bf.backfill_tracks(conn, [CpuAnalysisHead(), TagHead(FakeScorer())], 10, artist_id=str(a))
+    assert done == 1
+    assert len(calls) == 1
+    artist_id, track_id, platform, n_segs = calls[0]
+    assert (artist_id, track_id, platform) == (str(a), str(t), "bandcamp")
+    assert n_segs >= 1  # the same windows the heads ran on
+
+
 def test_track_tag_upsert_roundtrip(conn):
     a = conn.execute(
         "INSERT INTO artist (display_name, mbid) VALUES ('Tag Fixture', "

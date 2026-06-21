@@ -4,6 +4,9 @@ The embed pass runs heads on new tracks; this sweeps the existing corpus
 whenever a head is added or versioned (track_head_runs is the per-head
 ledger — ADR-015 pluggable heads). Re-downloads via the shared self-healing
 fetch, decodes once, cuts the SAME windows the embedder uses. Never re-embeds.
+Since it re-cuts the exact embed windows anyway, it also archives them (#54,
+best-effort) so artists swept here become re-embeddable for a future MuQ→MusicFM
+swap without a re-fetch.
 
 Run:  uv run poe analysis-backfill --limit 100000 --batch 25
 """
@@ -15,7 +18,14 @@ from pathlib import Path
 
 from psycopg import Connection
 
-from pipeline.embed_job import _clips_for_track, _decode, _default_refresher, _fetch_with_refresh, fetch_audio
+from pipeline.embed_job import (
+    _clips_for_track,
+    _decode,
+    _default_refresher,
+    _fetch_with_refresh,
+    _try_archive,
+    fetch_audio,
+)
 from pipeline.heads import HeadContext, run_heads
 
 
@@ -73,6 +83,12 @@ def backfill_tracks(
                     mono=mono, sr=sr, clip_paths=[p for _s, _e, p in segs],
                 )
                 run_heads(conn, heads, ctx)
+                # We already re-fetched + cut the exact embed windows to run heads,
+                # so archive them too (#54): a future embedder swap (MuQ→MusicFM)
+                # then re-embeds locally instead of re-downloading. Best-effort
+                # (savepoint-wrapped; no-ops when the disk is capped / ffmpeg absent),
+                # idempotent per track (ON CONFLICT in archive_window_clips).
+                _try_archive(conn, owner_id, str(tid), platform, segs)
             except Exception as exc:  # noqa: BLE001 — sweep survives, track retries next run
                 print(f"backfill: track {tid} isolated failure: {type(exc).__name__}: {exc}", flush=True)
                 skipped += 1
