@@ -900,7 +900,13 @@ def publish_rows(factory: Connection, app: Connection, rows: list[tuple], anchor
     published = 0
     for aid, mbid, name, source, embedding, _model, ratio in rows:
         akey = str(aid)
-        urls = urls_by.get(akey, {})
+        # Reconcile ALL factory-derived URL columns (#44): present platforms get
+        # their URL, ABSENT ones get NULL — so serving's *_url set is EXACTLY the
+        # factory's identities and clearing a source (deleting its identity) nulls
+        # the serving column on republish. discogs_url et al. aren't factory
+        # sources (not in _URL_BUILDERS) so they're never touched.
+        present = urls_by.get(akey, {})
+        urls = {col: present.get(col) for col in _URL_COLUMNS.values()}
         tags = tags_by.get(akey, {})
         perceptual = perc_by.get(akey)
         language = lang_by.get(akey)

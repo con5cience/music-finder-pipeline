@@ -166,6 +166,29 @@ def test_publish_upserts_and_is_idempotent(conn):
     assert (n, name) == (1, "Renamed Fixture")
 
 
+def test_publish_nulls_url_when_identity_removed(conn):
+    # #44: clearing a source = deleting its factory identity; the next publish must
+    # NULL the serving *_url column (publish reconciles ALL factory-derived urls),
+    # leaving the other sources' columns intact.
+    a = _factory_artist(conn)  # bandcamp + deezer identities
+    _serving_schema(conn)
+    publish_artists(conn, conn, limit=10_000_000)
+    row = conn.execute(
+        "SELECT bandcamp_url, deezer_url FROM artists WHERE mbid = %s", (MBID,)
+    ).fetchone()
+    assert row[0] == "https://zz-pub-band.bandcamp.com"
+    assert row[1] == "https://www.deezer.com/artist/990077"
+
+    # remove the bandcamp identity (the "clear" effect) and republish
+    conn.execute("DELETE FROM platform_identity WHERE artist_id = %s AND platform = 'bandcamp'", (a,))
+    publish_artists(conn, conn, limit=10_000_000)
+    row = conn.execute(
+        "SELECT bandcamp_url, deezer_url FROM artists WHERE mbid = %s", (MBID,)
+    ).fetchone()
+    assert row[0] is None                                   # nulled
+    assert row[1] == "https://www.deezer.com/artist/990077"  # untouched
+
+
 def test_tags_use_calibrated_positive_z_only(conn):
     a = _factory_artist(conn)
     tags = artist_tags(conn, a)
