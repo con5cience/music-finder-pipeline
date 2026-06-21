@@ -29,7 +29,9 @@ WARMUP=2700
 # not yet exec-able) is inconclusive and waits on. Capped so a host GPU/driver
 # fault can't flap recreates forever.
 MODEL_MIN_MB=3000        # live floor ~5221MB observed, DOA ~784MB — wide margin
-MODEL_LOAD_DEADLINE=600  # model load is ~30s; absent by 10min => DOA, not slow
+MODEL_LOAD_DEADLINE=180  # model load is ~30s; absent by 3min => DOA, not slow
+                         # (was 600; tightened 2026-06-21 — 10min DOA recovery was
+                         # lost time; 180s is still 6x the ~30s load, near-zero FP)
 DOA_RECREATES_MAX=2
 # GPU util + VRAM, sampled THROUGH the worker-gpu container (the doctor's own
 # alpine image has no nvidia-smi). Every incident (2026-06-14/15/18) was hard to
@@ -91,6 +93,20 @@ while true; do
     echo "$(date -u +%H:%M) doctor: DB unreachable — no action [gpu $GPU | $QUEUE]"
     ZEROES=0
   elif [ "$RATE" -eq 0 ]; then
+    # Fast DOA path (2026-06-21): a zero-embed worker whose MuQ model is absent
+    # from VRAM is unambiguously dead — recreate NOW instead of waiting out the
+    # 2-strike path (~60min lost). Only a VALID sub-threshold reading is DOA; an
+    # empty reading (worker down/not exec-able) is inconclusive and falls through
+    # to strikes. A flood has the model resident (mem >= MIN), so it never trips
+    # this — it still reaches the flood branch below.
+    _mem=$(gpu_mem_mb)
+    if [ -n "$_mem" ] && [ "$_mem" -lt "$MODEL_MIN_MB" ]; then
+      echo "$(date -u +%H:%M) doctor: DOA worker mid-run — MuQ not resident (${_mem}MB < ${MODEL_MIN_MB}MB) — recreating now [gpu $GPU | $QUEUE]"
+      docker compose -f /workspace/compose.yaml up -d --force-recreate worker-gpu worker-io
+      ZEROES=0
+      warmup
+      continue
+    fi
     ZEROES=$((ZEROES+1))
     echo "$(date -u +%H:%M) doctor: zero embeds (strike $ZEROES/2) [gpu $GPU | $QUEUE]"
     if [ "$ZEROES" -ge 2 ]; then
