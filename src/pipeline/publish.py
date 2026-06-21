@@ -104,8 +104,13 @@ def publishable_artists(conn: Connection, limit: int, since=None, after_id=None)
     """All embedded artists, or — incremental mode — only those whose
     embedding or artist tags changed since the watermark. Banned artists
     never publish (ban_ledger, the do-not-rediscover law)."""
+    # Republish when the embedding changed, an admin edit requested it
+    # (republish_requested_at — set by updateFactoryArtistField in serving; NULL
+    # by default so it matches ONLY edited artists, no churn), or tag scores
+    # changed.
     since_sql = """
           AND (ae.computed_at >= %(since)s
+               OR a.republish_requested_at >= %(since)s
                OR EXISTS (SELECT 1 FROM artist_tag_scores ats
                           WHERE ats.artist_id = a.id AND ats.computed_at >= %(since)s))
     """ if since is not None else ""

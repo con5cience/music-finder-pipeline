@@ -465,6 +465,33 @@ def test_incremental_publish_watermark_and_bans(conn):
     assert conn.execute("SELECT count(*) FROM artists WHERE name = 'Inc One'").fetchone()[0] == 0
 
 
+def test_incremental_publish_picks_up_admin_field_edit(conn):
+    """Phase-1 admin->factory: an admin field edit stamps republish_requested_at with
+    NO embedding or tag-score change; the incremental sync must still re-publish that
+    artist (so the edit reaches serving), driven by the republish_requested_at arm of
+    publishable_artists. A null republish_requested_at (the default) never matches."""
+    from pipeline.publish import publishable_artists
+
+    _serving_schema(conn)
+
+    def names(since):
+        return sorted(r[2] for r in publishable_artists(conn, 100, since=since))
+
+    aid = conn.execute(
+        "INSERT INTO artist (display_name, mbid, embedding_source) VALUES "
+        "('Edit Me', '00000000-feed-4bad-9bad-000000000ed1', 'deezer') RETURNING id").fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio, computed_at) "
+        "VALUES (%s, 'mock-model', 2, '[1,0]', 3, 1.0, '2026-01-01')", (aid,))
+
+    # embedding is old + no edit requested (republish_requested_at NULL) → nothing
+    assert names(since="2026-02-01") == []
+    # admin edits the name -> factory stamps republish_requested_at AFTER the watermark
+    conn.execute(
+        "UPDATE artist SET display_name = 'Edited', republish_requested_at = '2026-03-15' WHERE id = %s", (aid,))
+    assert names(since="2026-02-01") == ["Edited"]  # re-eligible via republish_requested_at
+
+
 def test_incremental_drain_advances_keyset(conn):
     """Second review catch: drain-until-empty must ADVANCE — with
     changed-set > limit, iterations page by keyset instead of re-publishing
