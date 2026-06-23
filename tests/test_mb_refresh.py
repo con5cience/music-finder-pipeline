@@ -84,6 +84,24 @@ def test_refresh_apply_adds_and_swaps(conn, refresh_dump):
     assert conn.execute("SELECT count(*) FROM mb_raw.artist").fetchone()[0] > 0
 
 
+def test_adds_preview_equals_applied_minted(conn, refresh_dump):
+    # con5cience/music-finder-pipeline#1: the `adds` preview must count the
+    # artists the apply actually mints (MB artists matching OUR platform
+    # patterns), not MB artists with ANY url. The fixture's A_HOMEPAGE_ONLY has
+    # only a non-platform homepage url — it must NOT inflate `adds` (the old
+    # any-url query counted it, over-reporting vs the apply).
+    from test_mb_bootstrap import A_HOMEPAGE_ONLY, GID
+
+    before = conn.execute("SELECT count(*) FROM artist").fetchone()[0]
+    dry = run_refresh(conn, refresh_dump, apply=False, serial="20990101-000010")
+    run_refresh(conn, refresh_dump, apply=True, serial="20990101-000011")
+    after = conn.execute("SELECT count(*) FROM artist").fetchone()[0]
+    assert dry["adds"] == after - before  # preview == actually minted
+    assert conn.execute(
+        "SELECT count(*) FROM artist WHERE mbid = %s", (GID[A_HOMEPAGE_ONLY],)
+    ).fetchone()[0] == 0  # homepage-only artist never minted
+
+
 def test_merge_both_embedded_goes_to_review(conn, refresh_dump):
     # two LOCAL artists, both embedded; the new dump merges old→new mbid
     old = conn.execute(

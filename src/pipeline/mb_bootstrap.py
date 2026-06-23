@@ -92,16 +92,16 @@ def _patterns_values_sql() -> tuple[str, list[str]]:
     return rows, params
 
 
-def derive_identities(conn: Connection, *, schema: str = "mb_raw") -> dict[str, int]:
-    """Derive artist + platform_identity rows from active artist→url rels.
+def matched_artist_url_cte(schema: str) -> tuple[str, list[str]]:
+    """`WITH patterns, matched AS (...)` selecting MB artists whose url matches
+    one of OUR platform patterns — exactly the set derive_identities mints into
+    `artist`/`platform_identity`.
 
-    Idempotent: conflicts on artist.mbid / (platform, platform_id) are skipped
-    — which makes this the ADR-018 refresh diff-apply too (run against
-    mb_raw_next: only NEW artists/identities land). Returns per-platform
-    identity counts (cumulative, post-derive).
-    """
+    Shared so the ADR-018 refresh "adds" preview counts the same population the
+    apply actually lands; counting MB artists with *any* url over-reported it by
+    ~360x (con5cience/music-finder-pipeline#1)."""
     rows, params = _patterns_values_sql()
-    matched_cte = f"""
+    cte = f"""
         WITH patterns (platform, host_re, id_re) AS (VALUES {rows}),
         matched AS (
             SELECT a.gid AS mbid, a.name, p.platform,
@@ -114,6 +114,18 @@ def derive_identities(conn: Connection, *, schema: str = "mb_raw") -> dict[str, 
             WHERE substring(u.url FROM p.id_re) IS NOT NULL
         )
     """
+    return cte, params
+
+
+def derive_identities(conn: Connection, *, schema: str = "mb_raw") -> dict[str, int]:
+    """Derive artist + platform_identity rows from active artist→url rels.
+
+    Idempotent: conflicts on artist.mbid / (platform, platform_id) are skipped
+    — which makes this the ADR-018 refresh diff-apply too (run against
+    mb_raw_next: only NEW artists/identities land). Returns per-platform
+    identity counts (cumulative, post-derive).
+    """
+    matched_cte, params = matched_artist_url_cte(schema)
     # Two statements: an INSERT's rows aren't visible to later joins in the
     # same statement, and identities must join the artists they just created.
     conn.execute(

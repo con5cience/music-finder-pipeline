@@ -18,7 +18,7 @@ from pathlib import Path
 
 from psycopg import Connection
 
-from pipeline.mb_bootstrap import EXPECTED_COLS, derive_identities, load_mbdump
+from pipeline.mb_bootstrap import EXPECTED_COLS, derive_identities, load_mbdump, matched_artist_url_cte
 
 REFRESH_TABLES = dict(EXPECTED_COLS)
 REFRESH_TABLES["artist_gid_redirect"] = 3  # gid, new_id, created — merge map
@@ -74,13 +74,19 @@ def diff_and_apply(conn: Connection, *, apply: bool) -> dict:
     """The derive-diff. Dry-run computes counts without mutating the derived
     layer; apply runs the (idempotent) derivation + renames + merges."""
     out: dict = {}
-    # adds preview: derived candidates absent from the live artist table
+    # adds preview: NEW artists the apply will actually mint — i.e. MB artists
+    # matching one of our platform patterns (the derive_identities population),
+    # absent from the live artist table. Reuses the shared matched-CTE so the
+    # preview can't drift from the apply (was counting any-url → ~360x overcount,
+    # con5cience/music-finder-pipeline#1).
+    adds_cte, adds_params = matched_artist_url_cte("mb_raw_next")
     out["adds"] = conn.execute(
-        """
-        SELECT count(DISTINCT a.gid) FROM mb_raw_next.l_artist_url lau
-        JOIN mb_raw_next.artist a ON a.id = lau.entity0
-        WHERE NOT EXISTS (SELECT 1 FROM artist x WHERE x.mbid = a.gid)
-        """
+        adds_cte
+        + """
+        SELECT count(DISTINCT m.mbid) FROM matched m
+        WHERE NOT EXISTS (SELECT 1 FROM artist x WHERE x.mbid = m.mbid)
+        """,
+        adds_params,
     ).fetchone()[0]
     out["renames"] = conn.execute(
         """
