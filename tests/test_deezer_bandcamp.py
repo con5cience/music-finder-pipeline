@@ -6,7 +6,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pipeline.deezer_bandcamp import _group_means, bandcamp_top_tracks, recover_artist_bandcamp
+from pipeline.deezer_bandcamp import _group_means, bandcamp_top_tracks, calibrate, recover_artist_bandcamp
+
+
+def _lab(correct, sub, median, margin, n=3, match="exact"):
+    return {"correct": correct, "candidates": [
+        {"match": match, "subdomain": sub, "audio": {"n": n, "median": median}, "margin": margin}]}
 
 ALBUM = (Path(__file__).parent / "fixtures" / "bandcamp_album.html").read_bytes()
 
@@ -182,6 +187,27 @@ def test_group_means_collapses_per_track():
     # 3 window-vectors: 2 for track A, 1 for track B → one mean vector each
     means = _group_means([[1.0, 0.0], [1.0, 0.0], [0.0, 2.0]], [2, 1])
     assert means == [[1.0, 0.0], [0.0, 2.0]]
+
+
+def test_calibrate_finds_precision_setting_margin_excludes_twin():
+    labeled = [
+        _lab("good1", "good1", 0.85, 0.50),
+        _lab("good2", "good2", 0.82, 0.40),
+        _lab(None, "twin", 0.84, 0.03),  # genre-twin: high audio, tiny margin → must NOT bind
+    ]
+    res = calibrate(labeled, target_precision=1.0)
+    rec = res["recommended"]
+    assert rec is not None and rec["precision"] == 1.0
+    assert rec["margin_floor"] >= 0.05  # the floor is what keeps the twin out
+    assert rec["recall"] == 1.0          # both genuine matches still auto-bind
+
+
+def test_calibrate_reports_none_when_unseparable():
+    # a wrong candidate with an IDENTICAL scorecard to a correct one → any setting
+    # that binds the good binds the bad → precision capped at 0.5
+    labeled = [_lab("g", "g", 0.80, 0.20), _lab(None, "bad", 0.80, 0.20)]
+    res = calibrate(labeled, target_precision=1.0)
+    assert res["recommended"] is None
 
 
 def test_already_searched_is_skipped(conn):

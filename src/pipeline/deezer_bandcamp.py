@@ -234,6 +234,58 @@ def _review(conn: Connection, artist_id: str, display_name: str, scored: list[di
     return "review"
 
 
+# ---- calibration: set the auto-bind bar from a labelled review sample ---------
+
+def calibrate(
+    labeled: list[dict],
+    *,
+    target_precision: float = 0.99,
+    median_bars: list[float] | None = None,
+    margin_floors: list[float] | None = None,
+    min_tracks_opts: list[int] | None = None,
+) -> dict:
+    """Sweep the auto-bind policy over a human-labelled sample to find the
+    setting that hits `target_precision` at the highest recall — so auto-bind is
+    turned on with a *measured* precision, not a guess.
+
+    `labeled`: [{"correct": subdomain|None, "candidates": [scorecard, ...]}],
+    where each scorecard is exactly what the binder writes to review_item
+    evidence (match / audio.median / audio.n / margin). `correct` is the human's
+    chosen subdomain, or None if no candidate was right.
+
+    Applies the IDENTICAL eligibility rule the binder uses (`_eligible`), so the
+    swept numbers are the real auto-bind behaviour.
+    """
+    median_bars = median_bars or [round(0.60 + 0.02 * i, 2) for i in range(16)]  # 0.60..0.90
+    margin_floors = margin_floors or [0.0, 0.05, 0.10, 0.15, 0.20]
+    min_tracks_opts = min_tracks_opts or [1, 2, 3]
+    total_correct = sum(1 for a in labeled if a.get("correct"))
+
+    grid: list[dict] = []
+    for bar in median_bars:
+        for floor in margin_floors:
+            for mt in min_tracks_opts:
+                binds = correct = 0
+                for a in labeled:
+                    elig = [c for c in a["candidates"]
+                            if _eligible(c, threshold=bar, min_tracks=mt, margin_floor=floor)]
+                    if len(elig) == 1:  # the binder only auto-binds a unique eligible
+                        binds += 1
+                        if elig[0]["subdomain"] == a.get("correct"):
+                            correct += 1
+                grid.append({
+                    "median_bar": bar, "margin_floor": floor, "min_tracks": mt,
+                    "binds": binds, "correct": correct,
+                    "precision": (correct / binds) if binds else None,
+                    "recall": round(correct / total_correct, 4) if total_correct else 0.0,
+                })
+
+    passing = [g for g in grid if g["binds"] > 0 and g["precision"] is not None and g["precision"] >= target_precision]
+    best = max(passing, key=lambda g: (g["recall"], g["binds"]), default=None)
+    return {"target_precision": target_precision, "total_labeled": len(labeled),
+            "total_correct": total_correct, "recommended": best, "grid": grid}
+
+
 # ---- real candidate embedder (the GPU/network path; review-only run uses it) --
 
 def bandcamp_top_tracks(conn, subdomain: str, k: int = 3, *, fetcher=None, cache_dir=None) -> list:
