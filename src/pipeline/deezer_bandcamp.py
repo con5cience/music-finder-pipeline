@@ -41,7 +41,9 @@ import statistics
 import numpy as np
 from psycopg import Connection
 
+from pipeline.fetch_cache import cached_fetch
 from pipeline.search_bind import _edit1, artist_name_keys, normalize_name, search_bandcamp
+from pipeline.sources.bandcamp import parse_discography, parse_tralbum
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -230,3 +232,128 @@ def _review(conn: Connection, artist_id: str, display_name: str, scored: list[di
                      "method": "deezer_bandcamp_audio", "candidates": scored})),
     )
     return "review"
+
+
+# ---- real candidate embedder (the GPU/network path; review-only run uses it) --
+
+def bandcamp_top_tracks(conn, subdomain: str, k: int = 3, *, fetcher=None, cache_dir=None) -> list:
+    """Up to k streamable BcTracks for a candidate page (newest-first), via the
+    fetch cache + proxy laws. Single-release artists fall back to the root page."""
+    base = f"https://{subdomain}.bandcamp.com"
+
+    def get(path: str) -> bytes:
+        return cached_fetch(conn, "bandcamp", base + path, fetcher=fetcher, cache_dir=cache_dir).body
+
+    releases = parse_discography(get("/music"))[:5] or [""]
+    tracks: list = []
+    for path in releases:
+        if len(tracks) >= k:
+            break
+        parsed = parse_tralbum(get(path))
+        if parsed:
+            tracks.extend(parsed["tracks"])
+    return tracks[:k]
+
+
+def _group_means(vectors: list[list[float]], counts: list[int]) -> list[list[float]]:
+    """Collapse a flat window-vector list back to one mean vector per track."""
+    out, idx = [], 0
+    for n in counts:
+        chunk = vectors[idx:idx + n]
+        idx += n
+        if chunk:
+            out.append(_mean_vec([list(v) for v in chunk]))
+    return out
+
+
+def make_bandcamp_embedder(embedder, *, k: int = 3, fetcher=None, cache_dir=None):
+    """Build the candidate embedder: subdomain → up to k per-track MuQ embeddings
+    (mean of each track's RMS-peak windows). Reuses the production embed atoms
+    (fetch_audio / _decode / _clips_for_track / embedder.embed). Network+GPU —
+    exercised by the real run, not the hermetic suite."""
+
+    def _embed(conn, subdomain: str) -> list[list[float]]:
+        import tempfile
+        from pathlib import Path
+
+        from pipeline.bench.types import Clip
+        from pipeline.embed_job import _clips_for_track, _decode, fetch_audio
+
+        tracks = bandcamp_top_tracks(conn, subdomain, k, fetcher=fetcher, cache_dir=cache_dir)
+        if not tracks:
+            return []
+        counts: list[int] = []
+        clips: list = []
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp)
+            for i, t in enumerate(tracks):
+                try:
+                    path = fetch_audio(t.stream_url, workdir)
+                except Exception:  # noqa: BLE001 — per-track isolation; a dead stream just drops
+                    counts.append(0)
+                    continue
+                mono, sr = _decode(path)
+                segs = _clips_for_track(mono, sr, path, "bandcamp", t.duration_s, workdir, f"t{i}")
+                counts.append(len(segs))
+                clips.extend(Clip(id=f"{i}:{s}", artist_id="recover", path=p) for s, _e, p in segs)
+            if not clips:
+                return []
+            vectors = [list(v) for v in embedder.embed(clips)]  # GPU — inside the tempdir (reads clip files)
+        return _group_means(vectors, counts)
+
+    return _embed
+
+
+def main() -> None:
+    import argparse
+    import time
+
+    import psycopg
+
+    from pipeline.config import Settings
+    from pipeline.embedders.registry import get_embedder
+
+    ap = argparse.ArgumentParser(
+        description="Deezer→Bandcamp recovery (review-only by default; self-throttled, manual)"
+    )
+    ap.add_argument("--limit", type=int, default=100)
+    ap.add_argument("--batch", type=int, default=20)
+    ap.add_argument("--k", type=int, default=3, help="candidate tracks to embed per artist")
+    ap.add_argument("--sleep", type=float, default=1.0, help="politeness pause between artists")
+    ap.add_argument("--auto-bind-threshold", type=float, default=None,
+                    help="enable auto-bind at this audio median (omit = review-only)")
+    ap.add_argument("--min-tracks", type=int, default=2)
+    ap.add_argument("--margin-floor", type=float, default=0.10)
+    args = ap.parse_args()
+
+    embedder = get_embedder()
+    bc_embed = make_bandcamp_embedder(embedder, k=args.k)
+    stats: dict[str, int] = {}
+    with psycopg.connect(Settings().database_url) as conn:
+        done = 0
+        while done < args.limit:
+            rows = deezer_served_unbound(conn, min(args.batch, args.limit - done))
+            if not rows:
+                break
+            for aid, name in rows:
+                try:
+                    v = recover_artist_bandcamp(
+                        conn, str(aid), name, embedder=bc_embed,
+                        nearest_other_fn=nearest_other_cosine,
+                        auto_bind_threshold=args.auto_bind_threshold,
+                        min_tracks=args.min_tracks, margin_floor=args.margin_floor,
+                    )
+                except Exception as e:  # noqa: BLE001 — per-artist isolation (mined fleet law)
+                    print(f"  error {name!r}: {e}", flush=True)
+                    conn.rollback()
+                    v = "error"
+                stats[v] = stats.get(v, 0) + 1
+                done += 1
+                time.sleep(args.sleep)
+            conn.commit()
+            print(f"progress {done}: {stats}", flush=True)
+    print(f"FINAL: {stats}", flush=True)
+
+
+if __name__ == "__main__":
+    main()

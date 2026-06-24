@@ -4,7 +4,15 @@ audio binds. Stacks multi-track agreement + margin/kNN so the genre-twin tail
 
 from __future__ import annotations
 
-from pipeline.deezer_bandcamp import recover_artist_bandcamp
+from pathlib import Path
+
+from pipeline.deezer_bandcamp import _group_means, bandcamp_top_tracks, recover_artist_bandcamp
+
+ALBUM = (Path(__file__).parent / "fixtures" / "bandcamp_album.html").read_bytes()
+
+
+def _serve(body):
+    return lambda url: (200, "text/html", body)
 
 
 def _artist(conn, name="Recover Fixture") -> str:
@@ -162,6 +170,18 @@ def test_no_anchor_skips(conn):
     )
     assert v == "no_anchor"
     assert conn.execute("SELECT count(*) FROM search_attempt WHERE artist_id=%s", (a,)).fetchone()[0] == 0
+
+
+def test_bandcamp_top_tracks_parses_fixture(conn, tmp_path):
+    tracks = bandcamp_top_tracks(conn, "zz-fixture", k=3, fetcher=_serve(ALBUM), cache_dir=tmp_path)
+    assert 1 <= len(tracks) <= 3
+    assert all(t.stream_url and t.duration_s for t in tracks)
+
+
+def test_group_means_collapses_per_track():
+    # 3 window-vectors: 2 for track A, 1 for track B → one mean vector each
+    means = _group_means([[1.0, 0.0], [1.0, 0.0], [0.0, 2.0]], [2, 1])
+    assert means == [[1.0, 0.0], [0.0, 2.0]]
 
 
 def test_already_searched_is_skipped(conn):

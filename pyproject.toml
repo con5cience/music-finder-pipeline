@@ -99,6 +99,7 @@ discover = "python -m pipeline.discovery"   # ADR-019 BC discovery (trickle valv
 mb-submit = "python -m pipeline.mb_submit"   # MB contribution lane (consent → queue → tags)
 deezer-embeds = "python -m pipeline.deezer_embeds"   # sync analyzed Deezer track ids -> serving deezer_top_tracks (#26)
 harvest-bc-tags = "python -m pipeline.harvest_bc_tags"   # backfill Bandcamp human tags from cached pages (#35; run in a worker container for the cache volume)
+deezer-bandcamp-recover = "python -m pipeline.deezer_bandcamp"   # Deezer→Bandcamp recovery, audio-gated (review-only default; self-throttled, manual, POST-LAUNCH — don't share the live embed pool)
 block-tag = "python -m pipeline.block_tag add"   # black-hole a tag across all publish tiers (#35), e.g. `poe block-tag cdmx`
 unblock-tag = "python -m pipeline.block_tag remove"
 list-blocked-tags = "python -m pipeline.block_tag list"
