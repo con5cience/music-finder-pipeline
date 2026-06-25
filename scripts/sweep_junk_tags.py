@@ -99,7 +99,7 @@ def has_genre_signal(tag: str, genre_words: frozenset[str]) -> bool:
 KEEP_SUFFIX = re.compile(
     r"(core|wave|gaze|step|punk|pop|house|metal|grind|techno|synth|funk|jazz|folk|disco|wonk|phonk|trap|drone|"
     r"noise|sludge|crust|hop|dub|rock|soul|blues|grunge|emo|ska|garage|industrial|ambient|breaks|hardcore|"
-    r"gabber|rave)$")
+    r"gabber|rave|glitch|doom|tronica|dnb)$")  # +missed microgenre suffixes
 NON_GENRE_PREFIX = frozenset({
     "apple", "alba", "snail", "sponge", "tree", "white", "green", "farm", "road", "slaughter", "kitchen", "pillow",
     "nap", "baby", "horse", "puppy", "kitty", "meow", "poke", "roblox", "sega", "dino", "dulcimer", "fiddle", "sax",
@@ -113,7 +113,7 @@ NON_GENRE_PREFIX = frozenset({
 def microgenre_keep(tag: str) -> bool:
     """True for a no-separator microgenre compound worth APPROVING (not dropping)."""
     m = KEEP_SUFFIX.search(tag)
-    if not m or " " in tag or "-" in tag or "/" in tag or not (6 <= len(tag) <= 24):
+    if not m or any(ch in tag for ch in " -/&.") or not (6 <= len(tag) <= 24):
         return False
     prefix = tag[: m.start()]
     return len(prefix) >= 2 and prefix not in NON_GENRE_PREFIX
