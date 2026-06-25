@@ -91,6 +91,34 @@ def has_genre_signal(tag: str, genre_words: frozenset[str]) -> bool:
     return any(w in genre_words for w in _TOK.split(tag) if w) or bool(GENRE_ROOT.search(tag))
 
 
+# KEEP lane: a no-separator compound ending in a strong genre-family suffix is almost
+# always a real microgenre (witchstep, vaporrock, ambienttechno) that publish's
+# token-recovery MISSES (no separator to split on), so it'd be silently dropped.
+# Validated 86% recall on human-approved labels. Guarded by NON_GENRE_PREFIX (the
+# fish/pun/object/slur prefixes that share these suffixes — albacore, applecore, …).
+KEEP_SUFFIX = re.compile(
+    r"(core|wave|gaze|step|punk|pop|house|metal|grind|techno|synth|funk|jazz|folk|disco|wonk|phonk|trap|drone|"
+    r"noise|sludge|crust|hop|dub|rock|soul|blues|grunge|emo|ska|garage|industrial|ambient|breaks|hardcore|"
+    r"gabber|rave)$")
+NON_GENRE_PREFIX = frozenset({
+    "apple", "alba", "snail", "sponge", "tree", "white", "green", "farm", "road", "slaughter", "kitchen", "pillow",
+    "nap", "baby", "horse", "puppy", "kitty", "meow", "poke", "roblox", "sega", "dino", "dulcimer", "fiddle", "sax",
+    "guitar", "string", "peter", "mau5", "batushka", "entombed", "stalin", "seinfeld", "audacity", "kurdista",
+    "america", "krsna", "jesus", "god", "business", "history", "holiday", "cardio", "sports", "book", "keepsake",
+    "whatever", "something", "awesome", "tard", "autism", "autistic", "tranny", "hentai", "jizz", "scat", "piss",
+    "fuck", "spit", "slurp", "mummy", "spoop", "sparkle", "slime",
+})
+
+
+def microgenre_keep(tag: str) -> bool:
+    """True for a no-separator microgenre compound worth APPROVING (not dropping)."""
+    m = KEEP_SUFFIX.search(tag)
+    if not m or " " in tag or "-" in tag or "/" in tag or not (6 <= len(tag) <= 24):
+        return False
+    prefix = tag[: m.start()]
+    return len(prefix) >= 2 and prefix not in NON_GENRE_PREFIX
+
+
 # Bare demonym/nationality as a tag = location-ish junk (the genre would be
 # "<nationality> <genre>"; bare won't false-match those).
 NATIONALITIES = frozenset({
@@ -134,10 +162,15 @@ def main() -> None:
     args = ap.parse_args()
 
     with psycopg.connect(Settings().database_url) as conn:
-        undecided = [r[0] for r in conn.execute(
-            "SELECT f.tag FROM tag_review_freq f "
+        # Exclude already-aliased tags: an alias folds the tag to its canonical at
+        # publish, so it must NOT also be approved/blocked as itself.
+        alias_exists = conn.execute("SELECT to_regclass('tag_alias')").fetchone()[0] is not None
+        alias_clause = "AND NOT EXISTS (SELECT 1 FROM tag_alias al WHERE al.alias=f.tag) " if alias_exists else ""
+        undecided = [(r[0], r[1]) for r in conn.execute(
+            "SELECT f.tag, f.df FROM tag_review_freq f "
             "WHERE NOT EXISTS (SELECT 1 FROM tag_manual_blocklist b WHERE b.tag=f.tag) "
-            "AND NOT EXISTS (SELECT 1 FROM tag_approved a WHERE a.tag=f.tag)").fetchall()]
+            "AND NOT EXISTS (SELECT 1 FROM tag_approved a WHERE a.tag=f.tag) "
+            f"{alias_clause}").fetchall()]
         mbvocab = frozenset(r[0] for r in conn.execute(
             "SELECT lower(name) FROM mb_raw.genre UNION SELECT lower(name) FROM mb_raw.genre_alias").fetchall())
         approved = frozenset(r[0] for r in conn.execute("SELECT tag FROM tag_approved").fetchall())
@@ -147,8 +180,14 @@ def main() -> None:
     genre_words = frozenset(w for g in (approved | mbvocab) for w in _TOK.split(g) if w)
 
     blocks: dict[str, list[str]] = {}
-    for tag in undecided:
+    approves: list[str] = []
+    for tag, df in undecided:
         if tag in mbvocab:  # real genre per MB — never touch
+            continue
+        # df>=2 microgenre publish would otherwise drop (no-separator, token-recovery
+        # misses it) — KEEP. df=1 is rec-dead, so leave it undecided, not auto-approved.
+        if df >= 2 and microgenre_keep(tag):
+            approves.append(tag)
             continue
         cat = heuristic_category(tag)
         if cat:
@@ -187,21 +226,26 @@ def main() -> None:
             continue
 
     total = sum(len(v) for v in blocks.values())
-    print(f"undecided={len(undecided)}  would-block={total}")
+    print(f"undecided={len(undecided)}  would-block={total}  would-keep(microgenre)={len(approves)}")
     for reason in sorted(blocks, key=lambda r: -len(blocks[r])):
         print(f"  {reason:16} {len(blocks[reason])}")
     json.dump(blocks, open("/tmp/sweep_blocks.json", "w"))
-    print("\nfull list -> /tmp/sweep_blocks.json")
+    json.dump(approves, open("/tmp/sweep_approves.json", "w"))
+    print("\nblocks -> /tmp/sweep_blocks.json , microgenre approves -> /tmp/sweep_approves.json")
 
     if args.apply:
         flat = sorted({t for v in blocks.values() for t in v})
         with psycopg.connect(Settings().database_url) as conn:
-            conn.cursor().executemany(
-                "INSERT INTO tag_manual_blocklist (tag, reason, source, category) "
-                "VALUES (%s,'sweep','ai',%s) ON CONFLICT (tag) DO NOTHING",
-                [(t, next(r for r in blocks if t in blocks[r])) for t in flat])
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO tag_manual_blocklist (tag, reason, source, category) "
+                    "VALUES (%s,'sweep','ai',%s) ON CONFLICT (tag) DO NOTHING",
+                    [(t, next(r for r in blocks if t in blocks[r])) for t in flat])
+                cur.executemany(
+                    "INSERT INTO tag_approved (tag, source) VALUES (%s,'ai') ON CONFLICT (tag) DO NOTHING",
+                    [(t,) for t in approves])
             conn.commit()
-        print(f"APPLIED {len(flat)} blocks")
+            print(f"APPLIED {len(flat)} blocks + {len(approves)} microgenre approves")
 
 
 if __name__ == "__main__":
