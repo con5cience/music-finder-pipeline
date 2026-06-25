@@ -754,6 +754,48 @@ def test_merge_human_tiers_caps_at_tag_k():
     assert out['lead'] == 99  # highest weight survives the cap
 
 
+def test_fold_aliases_remaps_and_sums():
+    """Pure: each tag maps through alias->canonical; collisions sum weights; an
+    empty map is the identity."""
+    from pipeline.publish import fold_aliases
+
+    m = {"#folk": "folk", "eletronica": "electronica"}
+    out = fold_aliases({"#folk": 2, "eletronica": 3, "folk": 1, "rock": 5}, m)
+    assert out["folk"] == 3  # 2 (#folk folded) + 1 (existing folk)
+    assert out["electronica"] == 3
+    assert out["rock"] == 5
+    assert fold_aliases({"a": 1}, {}) == {"a": 1}  # empty map = no-op
+
+
+def test_publish_folds_aliased_misspellings_to_canonical(conn):
+    """tag_alias folds a blocked-punctuation tag (#folk) AND an unrecoverable
+    misspelling (eletronica) onto their canonical BEFORE the BC allowlist/blocklist
+    gate, so the signal survives as the canonical instead of being dropped."""
+    from pipeline.publish import publish_rows, publishable_artists
+
+    _serving_schema(conn)
+    a = conn.execute(
+        "INSERT INTO artist (display_name, embedding_source) VALUES ('Aliased','bandcamp') RETURNING id"
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO artist_embedding (artist_id, model, dim, embedding, clip_count, signal_ratio) "
+        "VALUES (%s,'mock-model',2,'[0.6,0.8]',4,0.67)", (a,),
+    )
+    conn.execute(
+        "INSERT INTO bc_candidate (platform_id, band_name, band_url, tags, status, artist_id) "
+        "VALUES ('zz-alias','Aliased','https://x','{\"#folk\",\"eletronica\"}','admitted',%s)", (a,),
+    )
+    conn.execute("INSERT INTO tag_approved (tag, source) VALUES ('folk','human'),('electronica','human')")
+    conn.execute("INSERT INTO tag_manual_blocklist (tag, reason, source) VALUES ('#folk','junk','ai')")
+    conn.execute("INSERT INTO tag_alias (alias, canonical) VALUES ('#folk','folk'),('eletronica','electronica')")
+
+    publish_rows(conn, conn, publishable_artists(conn, 10))
+
+    tags = conn.execute("SELECT tags FROM artists WHERE id=%s", (a,)).fetchone()[0]
+    assert "folk" in tags and "electronica" in tags  # signal preserved via the fold
+    assert "#folk" not in tags and "eletronica" not in tags  # raw forms gone
+
+
 def test_publish_unions_mb_genres_and_bandcamp_tags(conn):
     """Regression (autumn-us): an artist with BOTH MB genres AND Bandcamp human
     tags publishes the UNION, not just the MB tier (the old cascade dropped the

@@ -738,6 +738,26 @@ def merge_human_tiers(mb: dict, bc: dict) -> dict:
     return dict(top)
 
 
+def load_tag_alias_map(conn: Connection) -> dict[str, str]:
+    """alias -> canonical from the curated tag_alias table (empty if absent)."""
+    if conn.execute("SELECT to_regclass('tag_alias')").fetchone()[0] is None:
+        return {}
+    return {a: c for a, c in conn.execute("SELECT alias, canonical FROM tag_alias").fetchall()}
+
+
+def fold_aliases(tags: dict, alias_map: dict[str, str]) -> dict:
+    """Remap each tag through alias_map (alias -> canonical), SUMMING weights when
+    several aliases collapse onto the same canonical (so a misspelling's signal is
+    preserved, not dropped). Pure → unit tested."""
+    if not alias_map:
+        return tags
+    out: dict[str, int] = {}
+    for tag, w in tags.items():
+        c = alias_map.get(tag, tag)
+        out[c] = out.get(c, 0) + w
+    return out
+
+
 def load_anchor_genres(conn: Connection) -> dict[str, frozenset]:
     """artist_id(str) -> frozenset(MB editorial genres) for EVERY MB-covered
     artist — the kNN label-propagation anchors (ADR-025). Same vocab/alias logic
@@ -847,6 +867,14 @@ def publish_rows(factory: Connection, app: Connection, rows: list[tuple], anchor
     #      (kNN label-propagation, ADR-025), centered zero-shot as last-resort fallback.
     mb_by = mb_genres_batch(factory, aids)
     bc_by = bandcamp_tags_batch(factory, aids)
+    # Alias-fold (tag_alias): consolidate curated garbage/misspelling folksonomy tags
+    # onto their canonical (#folk->folk, eletronica->electronica) BEFORE the allowlist
+    # gate below — otherwise a blocked/unrecoverable misspelling is dropped and its
+    # signal lost. After folding, the canonical (if approved) passes the allowlist.
+    # The misspellings live in the BC folksonomy; MB/audio tiers are vocab-clean.
+    alias_map = load_tag_alias_map(factory)
+    if alias_map:
+        bc_by = {a: fold_aliases(d, alias_map) for a, d in bc_by.items()}
     # Genre-only ALLOWLIST + compound tokenization for the Bandcamp folksonomy
     # tier (decision 2026-06-20): the BC human tier is a messy folksonomy, so only
     # curator-APPROVED genre tags survive. Approved tags pass whole; an UNDECIDED
