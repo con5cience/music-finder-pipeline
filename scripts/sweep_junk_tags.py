@@ -66,6 +66,23 @@ GENRE_KW = re.compile(
     r"bass|trap|emo|disco|funk|soul|blues|country|sludge|crust|industrial|dnb|garage|grunge|ska|dub|drill|grime|"
     r"step|vapor|glitch|gospel|cumbia|flamenco|salsa|fado|klezmer|reggae|dancehall|tango|chanson|raga)")
 
+# Genre-root SUBSTRING (>=4 chars to avoid rap/pop/emo/ska/dub over-matching) — catches
+# no-space compound genres like 'afropunk'/'deathgaze' that token-matching misses.
+GENRE_ROOT = re.compile(
+    r"(core|wave|metal|punk|house|techno|synth|gaze|grind|doom|jazz|folk|ambient|drone|noise|rock|beat|bass|trap|"
+    r"disco|funk|soul|blues|country|sludge|crust|industrial|garage|grunge|dub|drill|grime|step|vapor|glitch|gospel|"
+    r"cumbia|flamenco|salsa|klezmer|reggae|dancehall|tango|chanson|goth|tech|pop|shoegaze|hardcore|breakcore|dnb|edm|"
+    r"idm|ebm|hiphop|hip-hop|hip hop|wonk|phonk|electro|acoustic|orchestr|classical|baroque|symphon|opera|choral|"
+    r"chamber|swing|bebop|fusion|bossa)")
+_TOK = re.compile(r"[ \-_/]+")
+
+
+def has_genre_signal(tag: str, genre_words: frozenset[str]) -> bool:
+    """A tag carries a genre signal if any token is a known genre-word OR it contains
+    a genre-root substring. Tags with NEITHER are the unpatterned junk tail."""
+    return any(w in genre_words for w in _TOK.split(tag) if w) or bool(GENRE_ROOT.search(tag))
+
+
 # Bare demonym/nationality as a tag = location-ish junk (the genre would be
 # "<nationality> <genre>"; bare won't false-match those).
 NATIONALITIES = frozenset({
@@ -118,6 +135,8 @@ def main() -> None:
         approved = frozenset(r[0] for r in conn.execute("SELECT tag FROM tag_approved").fetchall())
         artist_names = frozenset(r[0] for r in conn.execute(
             "SELECT DISTINCT lower(display_name) FROM artist WHERE display_name IS NOT NULL").fetchall())
+    # Genre-word lexicon: every token of every known genre (approved ∪ MB).
+    genre_words = frozenset(w for g in (approved | mbvocab) for w in _TOK.split(g) if w)
 
     blocks: dict[str, list[str]] = {}
     review: dict[str, list[str]] = {}
@@ -148,6 +167,13 @@ def main() -> None:
             continue
         if tag in artist_names and not GENRE_KW.search(tag):
             blocks.setdefault("artist-name", []).append(tag)
+            continue
+        # No-genre-signal: tag has neither a known genre-word token nor a genre-root
+        # substring. Validated against ~1.8k human block + 18 approve labels: ~0
+        # genre loss (the only "FPs" were place/instrument), catches the bulk of the
+        # unpatterned junk tail (alan turing, 528 hz, bob ross, caracas, ...).
+        if not has_genre_signal(tag, genre_words):
+            blocks.setdefault("no-genre-signal", []).append(tag)
             continue
 
     total = sum(len(v) for v in blocks.values())
