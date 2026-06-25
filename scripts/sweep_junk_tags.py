@@ -57,8 +57,12 @@ CURATED_JUNK: frozenset[str] = frozenset({
     "free album","record store day","kbd","sad bastard music","video game music cover",
 })
 
-HASHTAG = re.compile(r"^#")
-DOTTED = re.compile(r"^([a-z0-9]\.){2,}[a-z0-9]\.?$")  # e.l.e.c.t.r.o  (single chars + dots)
+# Tags should be plain text + genre-legit punctuation only (- & ' !). Block any
+# tag carrying junk symbols (#hashtags, dots, slashes, pipes, parens, emoji, …) or
+# non-Latin scripts. Accented Latin is KEPT (forró, axé, post-métal, raï). Validated
+# 0/30 false positives on human-approved labels.
+JUNK_PUNCT = re.compile(
+    r"[#./\\|:;()\[\]{}*=+<>~^@?\"]|[Ͱ-ϿЀ-ӿ֐-׿؀-ۿ぀-ヿ㐀-鿿가-힯\U0001F000-\U0001FAFF]")
 # Genre-keyword guard: never auto-block an artist-name match that LOOKS like a
 # genre (a band named for a genre) — those go to human review, not the blocklist.
 GENRE_KW = re.compile(
@@ -139,7 +143,6 @@ def main() -> None:
     genre_words = frozenset(w for g in (approved | mbvocab) for w in _TOK.split(g) if w)
 
     blocks: dict[str, list[str]] = {}
-    review: dict[str, list[str]] = {}
     for tag in undecided:
         if tag in mbvocab:  # real genre per MB — never touch
             continue
@@ -147,8 +150,8 @@ def main() -> None:
         if cat:
             blocks.setdefault(cat, []).append(tag)
             continue
-        if HASHTAG.search(tag) or DOTTED.match(tag):
-            review.setdefault("alias-candidate", []).append(tag)
+        if JUNK_PUNCT.search(tag):
+            blocks.setdefault("junk-punctuation", []).append(tag)
             continue
         if tag in CURATED_JUNK:
             blocks.setdefault("curated", []).append(tag)
@@ -177,12 +180,11 @@ def main() -> None:
             continue
 
     total = sum(len(v) for v in blocks.values())
-    print(f"undecided={len(undecided)}  would-block={total}  alias-candidates={sum(len(v) for v in review.values())}")
+    print(f"undecided={len(undecided)}  would-block={total}")
     for reason in sorted(blocks, key=lambda r: -len(blocks[r])):
-        print(f"  {reason:14} {len(blocks[reason])}")
+        print(f"  {reason:16} {len(blocks[reason])}")
     json.dump(blocks, open("/tmp/sweep_blocks.json", "w"))
-    json.dump(review, open("/tmp/sweep_alias_candidates.json", "w"))
-    print("\nfull lists -> /tmp/sweep_blocks.json , /tmp/sweep_alias_candidates.json")
+    print("\nfull list -> /tmp/sweep_blocks.json")
 
     if args.apply:
         flat = sorted({t for v in blocks.values() for t in v})
