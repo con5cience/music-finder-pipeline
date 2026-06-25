@@ -58,6 +58,10 @@ LOCATIONS: frozenset[str] = frozenset(
         "bay area", "oakland", "seattle", "portland", "chicago", "detroit", "atlanta", "austin",
         "nashville", "new orleans", "boston", "philadelphia", "washington dc", "denver", "minneapolis",
         "cdmx", "mexico city", "sao paulo", "rio de janeiro", "buenos aires", "bogota",
+        # more recurring music cities (non-exhaustive; the LLM lane catches the rest)
+        "toulouse", "lille", "bordeaux", "nantes", "marseille", "strasbourg", "leeds", "sheffield",
+        "nottingham", "liverpool", "cardiff", "belfast", "gothenburg", "malmo", "antwerp", "ghent",
+        "turin", "naples", "valencia", "seville", "porto", "krakow", "warsaw", "prague", "budapest",
     }
 )
 
@@ -84,8 +88,40 @@ META: frozenset[str] = frozenset(
     }
 )
 
+# Mood / feeling descriptors that are clearly NOT genres. Kept narrow + distinct
+# from the genre-adjacent words (ambient/bass/lo-fi stay out). The existing META
+# set already holds a few (dark/dreamy/…); these add the rest of the clear moods.
+MOODS: frozenset[str] = frozenset(
+    {
+        "depressing", "erotic", "exotic", "easy", "sexy", "sensual", "romantic", "nostalgic",
+        "soothing", "aggressive", "angry", "calm", "gloomy", "haunting", "dramatic", "intense",
+        "playful", "quirky", "groovy", "mellow", "smooth", "spooky", "creepy", "warm", "cold",
+        "feel good", "feelgood", "bittersweet", "hopeful", "anthemic", "danceable",
+    }
+)
+
+# US state postal codes — a trailing one after a place word marks a "<city> ST"
+# location tag (e.g. 'denver co', 'austin tx', 'portland or'). Conservative: only
+# fires with a preceding token, so 'or'/'in' as bare genres can't match.
+US_STATES: frozenset[str] = frozenset(
+    {
+        "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", "hi", "id", "il", "in", "ia",
+        "ks", "ky", "la", "me", "md", "ma", "mi", "mn", "ms", "mo", "mt", "ne", "nv", "nh", "nj",
+        "nm", "ny", "nc", "nd", "oh", "ok", "or", "pa", "ri", "sc", "sd", "tn", "tx", "ut", "vt",
+        "va", "wa", "wv", "wi", "wy",
+    }
+)
+
 _LABEL_SUFFIX = re.compile(r"\b(records|recordings|tapes|tape|label|productions|recs)$")
 _NUMERIC = re.compile(r"^[\d\s.,'\-]+$")  # year-only / number-only tags
+# Era/decade tags: '90s', "90's", '1990s', '00s', '2000s', word decades, and
+# decade-qualified compounds ("90's hip hop", '80s pop'). The canonical genre
+# inside a compound is still approved separately, so blocking the era variant
+# doesn't lose the genre (BC-tier tokenization recovers it). A decade token needs
+# a digit+0 so 'lo-fi'/'8 bit'/'100 gecs' never match.
+_DECADE = r"(?:19|20)?\d0(?:'|’)?s"
+_WORD_DECADES = r"twenties|thirties|forties|fifties|sixties|seventies|eighties|nineties|noughties|aughts"
+_ERA = re.compile(rf"^(?:{_DECADE}|{_WORD_DECADES})(?:\s+.+)?$", re.IGNORECASE)
 
 
 def heuristic_category(tag: str) -> str | None:
@@ -100,10 +136,18 @@ def heuristic_category(tag: str) -> str | None:
         return "instrument"
     if t in META:
         return "meta"
+    if t in MOODS:
+        return "mood"
+    if _ERA.match(t):
+        return "era"
     if _LABEL_SUFFIX.search(t):
         return "label"
     if _NUMERIC.match(t):
         return "meta"
+    # "<place> ST" — a trailing US state code after at least one word → location.
+    toks = t.replace(",", " ").split()
+    if len(toks) >= 2 and toks[-1] in US_STATES:
+        return "location"
     return None
 
 
@@ -206,25 +250,44 @@ def _block(conn: psycopg.Connection, tag: str, category: str) -> None:
     )
 
 
-def run_classify(conn: psycopg.Connection, *, limit: int | None = None, use_llm: bool = False) -> dict[str, int]:
+def run_classify(
+    conn: psycopg.Connection,
+    *,
+    limit: int | None = None,
+    use_llm: bool = False,
+    dry_run: bool = False,
+    samples: dict[str, list[str]] | None = None,
+) -> dict[str, int]:
     """Classify undecided tags against the CURRENT tag_review_freq snapshot.
     Returns counts per outcome. The caller refreshes the MV first (REFRESH
-    CONCURRENTLY can't run inside a transaction, so it's not done here)."""
+    CONCURRENTLY can't run inside a transaction, so it's not done here).
+
+    dry_run: compute the decisions but write NOTHING — for previewing the buckets
+    before committing a bulk classification. samples (optional): the fn fills it
+    with up to 15 example tags per category so the preview is inspectable."""
     vocab = mb_genre_vocab(conn)
     tags = undecided_tags(conn, limit)
     counts = {"genre_mb": 0, "block_heuristic": 0, "genre_llm": 0, "block_llm": 0, "undecided": 0}
     residual: list[str] = []
 
+    def _sample(category: str, t: str) -> None:
+        if samples is not None and len(samples.setdefault(category, [])) < 15:
+            samples[category].append(t)
+
     for tag in tags:
         t = tag.strip().lower()
         if t in vocab:
-            _approve(conn, t, "genre")
+            if not dry_run:
+                _approve(conn, t, "genre")
             counts["genre_mb"] += 1
+            _sample("genre", t)
             continue
         cat = heuristic_category(t)
         if cat:
-            _block(conn, t, cat)
+            if not dry_run:
+                _block(conn, t, cat)
             counts["block_heuristic"] += 1
+            _sample(cat, t)
             continue
         residual.append(t)
 
@@ -233,15 +296,22 @@ def run_classify(conn: psycopg.Connection, *, limit: int | None = None, use_llm:
         for t in residual:
             v = verdicts.get(t)
             if v == "genre":
-                _approve(conn, t, "genre")
+                if not dry_run:
+                    _approve(conn, t, "genre")
                 counts["genre_llm"] += 1
+                _sample("genre", t)
             elif v == "nongenre":
-                _block(conn, t, "llm")
+                if not dry_run:
+                    _block(conn, t, "llm")
                 counts["block_llm"] += 1
+                _sample("llm", t)
             else:
                 counts["undecided"] += 1
+                _sample("undecided", t)
     else:
         counts["undecided"] += len(residual)
+        for t in residual:
+            _sample("undecided", t)
 
     return counts  # caller owns the commit (keeps the fn transaction-agnostic)
 
@@ -250,18 +320,30 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="auto-classify tags (genre-only policy)")
     ap.add_argument("--limit", type=int, default=None, help="cap undecided tags processed")
     ap.add_argument("--llm", action="store_true", help="classify the residual via the LLM lane")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="preview the buckets (counts + sample tags) and write NOTHING")
     args = ap.parse_args()
     if args.llm and not llm_enabled():
         print("warning: --llm set but TAG_CLASSIFIER_LLM=anthropic + ANTHROPIC_API_KEY not configured; "
               "residual will be left undecided")
+    samples: dict[str, list[str]] = {}
     with psycopg.connect(Settings().database_url) as conn:
-        # Refresh the freq snapshot first so newly-discovered tags are seen.
-        # CONCURRENTLY must be its own statement (not inside the classify tx).
-        conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY tag_review_freq")
-        conn.commit()
-        counts = run_classify(conn, limit=args.limit, use_llm=args.llm)
-        conn.commit()
-    print("classified:", json.dumps(counts))
+        if not args.dry_run:
+            # Refresh the freq snapshot first so newly-discovered tags are seen.
+            # CONCURRENTLY must be its own statement (not inside the classify tx).
+            # Skipped for --dry-run: a preview reads the current snapshot + writes nothing.
+            conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY tag_review_freq")
+            conn.commit()
+        counts = run_classify(conn, limit=args.limit, use_llm=args.llm, dry_run=args.dry_run, samples=samples)
+        if args.dry_run:
+            conn.rollback()
+        else:
+            conn.commit()
+    print(("DRY-RUN " if args.dry_run else "") + "classified:", json.dumps(counts))
+    if samples:
+        print("\nsample tags per bucket:")
+        for category in sorted(samples):
+            print(f"  {category:14} {', '.join(samples[category])}")
 
 
 if __name__ == "__main__":

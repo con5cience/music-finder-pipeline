@@ -25,6 +25,47 @@ def test_heuristic_category_leaves_real_genres_undecided():
         assert heuristic_category(g) is None
 
 
+def test_heuristic_category_blocks_eras_moods_and_city_states():
+    # eras (bare decades + decade-qualified compounds + word decades)
+    for era in ("00s", "90s", "90's", "1990s", "2000s", "90's hip hop", "80s pop", "eighties", "nineties"):
+        assert heuristic_category(era) == "era", era
+    # moods
+    for mood in ("depressing", "erotic", "exotic", "easy", "sexy", "nostalgic"):
+        assert heuristic_category(mood) == "mood", mood
+    # "<city> ST" + a bare foreign city we added
+    assert heuristic_category("denver co") == "location"
+    assert heuristic_category("austin tx") == "location"
+    assert heuristic_category("toulouse") == "location"
+
+
+def test_new_heuristics_dont_false_positive_on_genres():
+    # decade-looking-but-genre, state-code-suffix-but-genre, mood-prefix-but-genre
+    for g in ("8-bit", "8 bit", "100 gecs", "2 step", "easy listening", "chicago house",
+              "detroit techno", "uk garage", "hip hop"):
+        assert heuristic_category(g) is None, g
+
+
+def test_dry_run_writes_nothing_but_reports_buckets(conn):
+    conn.execute(
+        "INSERT INTO mb_raw.genre (id, gid, name) "
+        "VALUES (972003,'00000000-0000-4000-8000-0000000c1a03','zz-realgenre')"
+    )
+    _seed_bc_tags(conn, ["zz-realgenre", "denver co", "00s"])
+    before_ap = conn.execute("SELECT count(*) FROM tag_approved").fetchone()[0]
+    before_bl = conn.execute("SELECT count(*) FROM tag_manual_blocklist").fetchone()[0]
+
+    samples: dict[str, list[str]] = {}
+    counts = run_classify(conn, use_llm=False, dry_run=True, samples=samples)
+
+    # nothing written
+    assert conn.execute("SELECT count(*) FROM tag_approved").fetchone()[0] == before_ap
+    assert conn.execute("SELECT count(*) FROM tag_manual_blocklist").fetchone()[0] == before_bl
+    # but the buckets are reported + sampled
+    assert counts["genre_mb"] == 1 and counts["block_heuristic"] == 2
+    assert "zz-realgenre" in samples.get("genre", [])
+    assert "denver co" in samples.get("location", []) and "00s" in samples.get("era", [])
+
+
 def _seed_bc_tags(conn, tags: list[str]) -> None:
     aid = conn.execute(
         "INSERT INTO artist (display_name, embedding_source) VALUES ('ClsTest','bandcamp') RETURNING id"
@@ -40,7 +81,10 @@ def _seed_bc_tags(conn, tags: list[str]) -> None:
 
 
 def test_run_classify_mb_vocab_and_heuristics(conn):
-    conn.execute("INSERT INTO mb_raw.genre (id, gid, name) VALUES (972001,'00000000-0000-4000-8000-0000000c1a01','zz-realgenre')")
+    conn.execute(
+        "INSERT INTO mb_raw.genre (id, gid, name) "
+        "VALUES (972001,'00000000-0000-4000-8000-0000000c1a01','zz-realgenre')"
+    )
     _seed_bc_tags(conn, ["zz-realgenre", "united kingdom", "zz-unknownsub"])
 
     counts = run_classify(conn, use_llm=False)
@@ -71,7 +115,10 @@ def test_run_classify_llm_residual(conn, monkeypatch):
 
 def test_run_classify_never_overwrites_human(conn):
     # a human block must survive a classify run even if MB vocab says genre.
-    conn.execute("INSERT INTO mb_raw.genre (id, gid, name) VALUES (972002,'00000000-0000-4000-8000-0000000c1a02','zz-human')")
+    conn.execute(
+        "INSERT INTO mb_raw.genre (id, gid, name) "
+        "VALUES (972002,'00000000-0000-4000-8000-0000000c1a02','zz-human')"
+    )
     conn.execute("INSERT INTO tag_manual_blocklist (tag, reason, source) VALUES ('zz-human','nope','human')")
     _seed_bc_tags(conn, ["zz-human"])
 
