@@ -79,6 +79,10 @@ GENRE_ROOT = re.compile(
     r"idm|ebm|hiphop|hip-hop|hip hop|wonk|phonk|electro|acoustic|orchestr|classical|baroque|symphon|opera|choral|"
     r"chamber|swing|bebop|fusion|bossa)")
 _TOK = re.compile(r"[ \-_/]+")
+# Format junk: a tag ending in band/song/ep/demo/… or carrying a "<n> string/piece"
+# unit is a release/lineup descriptor, not a genre. (Tuned from human block labels.)
+BAND_SONG = re.compile(r" (band|bands|song|songs|tune|tunes|ep|lp|demo|sessions)$")
+NUMBER_UNIT = re.compile(r"\b\d+\s?(string|piece|track|bit|key|inch|man)\b")
 
 
 def has_genre_signal(tag: str, genre_words: frozenset[str]) -> bool:
@@ -152,6 +156,9 @@ def main() -> None:
             continue
         if JUNK_PUNCT.search(tag):
             blocks.setdefault("junk-punctuation", []).append(tag)
+            continue
+        if BAND_SONG.search(tag) or NUMBER_UNIT.search(tag):
+            blocks.setdefault("format-junk", []).append(tag)
             continue
         if tag in CURATED_JUNK:
             blocks.setdefault("curated", []).append(tag)
