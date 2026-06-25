@@ -59,6 +59,48 @@ CURATED_JUNK: frozenset[str] = frozenset({
 
 HASHTAG = re.compile(r"^#")
 DOTTED = re.compile(r"^([a-z0-9]\.){2,}[a-z0-9]\.?$")  # e.l.e.c.t.r.o  (single chars + dots)
+# Genre-keyword guard: never auto-block an artist-name match that LOOKS like a
+# genre (a band named for a genre) — those go to human review, not the blocklist.
+GENRE_KW = re.compile(
+    r"(core|wave|metal|punk|house|techno|synth|gaze|grind|doom|jazz|folk|hop|ambient|drone|noise|pop|rock|beat|"
+    r"bass|trap|emo|disco|funk|soul|blues|country|sludge|crust|industrial|dnb|garage|grunge|ska|dub|drill|grime|"
+    r"step|vapor|glitch|gospel|cumbia|flamenco|salsa|fado|klezmer|reggae|dancehall|tango|chanson|raga)")
+
+# Bare demonym/nationality as a tag = location-ish junk (the genre would be
+# "<nationality> <genre>"; bare won't false-match those).
+NATIONALITIES = frozenset({
+    "american","british","canadian","australian","german","french","italian","spanish","portuguese","dutch",
+    "belgian","swedish","norwegian","danish","finnish","icelandic","polish","russian","ukrainian","japanese",
+    "chinese","korean","brazilian","argentine","argentinian","chilean","mexican","colombian","indian","indonesian",
+    "greek","turkish","austrian","swiss","czech","hungarian","romanian","bulgarian","filipino","iranian","irish",
+    "scottish","welsh","english","israeli","egyptian","nigerian","ethiopian","lithuanian","latvian","estonian",
+    "slovak","croatian","serbian","catalan","basque","mongolian","vietnamese","thai","peruvian","venezuelan",
+    "ecuadorian","cuban","jamaican","south african","south american","sudamerica","worldwide",
+})
+MEDIA = frozenset({
+    "star trek","the legend of zelda","super mario","donkey kong","elden ring","elder scrolls","warhammer",
+    "warhammer 40k","friendship is magic","brony music","hp lovecraft","harry potter","game of thrones","star wars",
+    "minecraft","undertale","final fantasy","pokemon","sonic the hedgehog","zelda","mario","kirby","earthbound",
+    "animal crossing","cyberpunk2077","skyrim","fallout","norse mythology","greek mythology","horror movies",
+    "anime","manga","movies","video games","cartoons","comics","video game cover","video games music",
+})
+EXTRA_INSTRUMENTS = frozenset({
+    "bassoon","keytar","duduk","charango","bandoneon","kantele","cajon","kazoo","cowbell","gongs","gong","shakuhachi",
+    "nyckelharpa","zither","mbira","flugelhorn","clarinette","clarinet","oboe","piccolo","harmonium","sitar","tabla",
+    "didgeridoo","theremin","melodica","glockenspiel","vibraphone","marimba","xylophone","timpani","harpsichord",
+    "concertina","dulcimer","hammered dulcimer","chapman stick","baritone sax","tenor sax","alto sax","soprano sax",
+    "double bass","upright bass","slap bass","bass solo","drum solo","violin solo","pipe organ","church organ",
+    "hammond b3","wurlitzer","rhodes","mellotron","harp music","flute music","guitarra","violon","8 string","7 string",
+})
+
+
+def music_suffix_junk(tag: str, mbvocab: frozenset[str], approved: frozenset[str]) -> bool:
+    """'<x> music' where x is NOT itself a genre → redundant/junk (icelandic music,
+    harp music, dream music). '<genre> music' (soul music) is kept (x is a genre)."""
+    if not tag.endswith(" music"):
+        return False
+    pre = tag[: -len(" music")].strip()
+    return bool(pre) and pre not in mbvocab and pre not in approved
 
 
 def main() -> None:
@@ -73,6 +115,7 @@ def main() -> None:
             "AND NOT EXISTS (SELECT 1 FROM tag_approved a WHERE a.tag=f.tag)").fetchall()]
         mbvocab = frozenset(r[0] for r in conn.execute(
             "SELECT lower(name) FROM mb_raw.genre UNION SELECT lower(name) FROM mb_raw.genre_alias").fetchall())
+        approved = frozenset(r[0] for r in conn.execute("SELECT tag FROM tag_approved").fetchall())
         artist_names = frozenset(r[0] for r in conn.execute(
             "SELECT DISTINCT lower(display_name) FROM artist WHERE display_name IS NOT NULL").fetchall())
 
@@ -91,7 +134,19 @@ def main() -> None:
         if tag in CURATED_JUNK:
             blocks.setdefault("curated", []).append(tag)
             continue
-        if tag in artist_names:
+        if tag in NATIONALITIES:
+            blocks.setdefault("nationality", []).append(tag)
+            continue
+        if tag in MEDIA:
+            blocks.setdefault("media", []).append(tag)
+            continue
+        if tag in EXTRA_INSTRUMENTS:
+            blocks.setdefault("instrument", []).append(tag)
+            continue
+        if music_suffix_junk(tag, mbvocab, approved):
+            blocks.setdefault("music-suffix", []).append(tag)
+            continue
+        if tag in artist_names and not GENRE_KW.search(tag):
             blocks.setdefault("artist-name", []).append(tag)
             continue
 
